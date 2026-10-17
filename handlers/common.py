@@ -1,5 +1,5 @@
-"""Команды, доступные всем."""
-from aiogram import Router
+"""Команды, доступные всем (в личке с ботом)."""
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
@@ -7,18 +7,28 @@ import db
 from roles import ADMIN, MODERATOR, ROLE_NAMES, get_role
 
 router = Router()
+router.message.filter(F.chat.type == "private")
 
 HELP_USER = (
     "/start — начать\n"
-    "/help — список команд\n"
-    "/myid — узнать свой Telegram ID"
+    "/points — мои баллы\n"
+    "/myid — узнать свой Telegram ID\n"
+    "/help — список команд"
 )
 HELP_STAFF = (
-    "\n\n<b>Для команды бота:</b>\n"
-    "/stats — сколько людей запустили бота"
+    "\n\n<b>📸 ФотоХант (для OC):</b>\n"
+    "/task #хэштег текст — опубликовать задание в чат делегатов\n"
+    "/task #хэштег 5 текст — то же, задание на 5 баллов\n"
+    "/tasks — все задания и статистика\n"
+    "/close #хэштег — перестать принимать фото\n"
+    "/open #хэштег — снова принимать фото\n"
+    "/top — рейтинг по баллам\n"
+    "/stats — сколько людей в базе бота\n\n"
+    "Фото с хэштегами из чата будут приходить сюда с кнопками ✅ / ❌."
 )
 HELP_ADMIN = (
     "\n\n<b>Только для админа:</b>\n"
+    "/setchat — отправь в чате делегатов, чтобы бот работал там\n"
     "/addmod ID — назначить модератора\n"
     "/delmod ID — снять модератора\n"
     "/mods — список модераторов"
@@ -53,3 +63,9 @@ async def cmd_help(message: Message) -> None:
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
     await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")
+
+
+@router.message(Command("points"))
+async def cmd_points(message: Message) -> None:
+    total = await db.get_points(message.from_user.id)
+    await message.answer(f"⭐ У тебя <b>{total}</b> балл(ов).")

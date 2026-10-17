@@ -1,5 +1,5 @@
 """Команды для админа и модераторов."""
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message
 
@@ -7,6 +7,7 @@ import db
 from roles import IsAdmin, IsStaff
 
 router = Router()
+router.message.filter(F.chat.type == "private")
 
 
 def _parse_id(command: CommandObject) -> int | None:
