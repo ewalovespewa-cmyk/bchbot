@@ -30,3 +30,8 @@ EXP_COOLDOWN_SECONDS = float(os.getenv("EXP_COOLDOWN_SECONDS", "2"))
 # Сколько мест в лидерборде и сколько из них с главными подарками
 EXP_TOP_SIZE = int(os.getenv("EXP_TOP_SIZE", "15"))
 EXP_PRIZE_PLACES = int(os.getenv("EXP_PRIZE_PLACES", "10"))
+
+# ---- Фазы Экспедиции: баллы по умолчанию (в каждом задании можно указать своё число) ----
+PHASE_WORD_POINTS = int(os.getenv("PHASE_WORD_POINTS", "5"))     # фаза 1: предложение со словом
+PHASE_WORD_MIN_WORDS = int(os.getenv("PHASE_WORD_MIN_WORDS", "3"))  # минимум слов в «предложении»
+PHASE_PHOTO_POINTS = int(os.getenv("PHASE_PHOTO_POINTS", "10"))  # фаза 2: засчитанное фото

@@ -257,6 +257,10 @@ async def cmd_points(message: Message) -> None:
         f"🎙 Голосовые и кружки: {b['voices']}",
         f"📸 Дней в ФотоХанте: {b['photohunt_days']} (+{b['photohunt_points']})",
     ]
+    if b["word_count"]:
+        lines.append(f"✍️ Задания со словами: {b['word_count']} (+{b['word_points']})")
+    if b["photo_count"]:
+        lines.append(f"🖼 Фото-задания: {b['photo_count']} (+{b['photo_points']})")
     if b["adjust_points"]:
         lines.append(f"🛠 Корректировка OC: {b['adjust_points']:+d}")
     await message.answer("\n".join(lines))

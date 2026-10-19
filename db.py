@@ -76,7 +76,60 @@ CREATE TABLE IF NOT EXISTS exp_photohunt_days (
     submission_id INTEGER,
     PRIMARY KEY (user_id, day)
 );
--- Общий журнал баллов (бонусы ФотоХанта, ручные корректировки OC и т. п.)
+-- ===== Фазы Экспедиции =====
+-- Фаза 1: задания «напиши предложение со словом»
+CREATE TABLE IF NOT EXISTS exp_word_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    word TEXT NOT NULL,
+    text TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    phase INTEGER,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    post_chat_id INTEGER,
+    post_message_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS exp_word_done (
+    task_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    chat_id INTEGER,
+    message_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (task_id, user_id)
+);
+-- Фаза 2: фото-задания Экспедиции (отдельно от ФотоХанта)
+CREATE TABLE IF NOT EXISTS exp_photo_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    hashtag TEXT UNIQUE NOT NULL,
+    text TEXT NOT NULL,
+    points INTEGER NOT NULL,
+    phase INTEGER,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    post_chat_id INTEGER,
+    post_message_id INTEGER
+);
+CREATE TABLE IF NOT EXISTS exp_photo_subs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id INTEGER NOT NULL,
+    user_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    file_id TEXT NOT NULL,
+    is_document INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending',
+    reviewer_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS exp_photo_review_msgs (
+    sub_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL
+);
+-- Общий журнал баллов (бонусы ФотоХанта, задания фаз, ручные корректировки OC и т. п.)
 CREATE TABLE IF NOT EXISTS points_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -382,6 +435,10 @@ async def points_breakdown(user_id: int) -> dict:
         "photohunt_days": by_source.get("photohunt_day", (0, 0))[1],
         "photohunt_points": by_source.get("photohunt_day", (0, 0))[0],
         "adjust_points": by_source.get("manual", (0, 0))[0],
+        "word_count": by_source.get("phase_word", (0, 0))[1],
+        "word_points": by_source.get("phase_word", (0, 0))[0],
+        "photo_count": by_source.get("phase_photo", (0, 0))[1],
+        "photo_points": by_source.get("phase_photo", (0, 0))[0],
     }
 
 
