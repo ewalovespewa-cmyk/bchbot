@@ -176,6 +176,14 @@ async def save_user(user_id: int, username: str | None, full_name: str) -> None:
         await db.commit()
 
 
+async def find_user_by_username(username: str):
+    async with _connect() as db:
+        cur = await db.execute(
+            "SELECT user_id, full_name FROM users WHERE lower(username)=lower(?)", (username.lstrip("@"),)
+        )
+        return await cur.fetchone()
+
+
 async def count_users() -> int:
     async with _connect() as db:
         cur = await db.execute("SELECT COUNT(*) FROM users")

@@ -240,6 +240,12 @@ async def cmd_points(message: Message) -> None:
     user_id = message.from_user.id
     if not await visible_to(user_id):
         return
+    if await is_staff(user_id):
+        await message.answer(
+            "Ты OC — тебе баллы не начисляются (и модераторам тоже). "
+            "Проверяй с обычного аккаунта. Рейтинг участников — /top, состояние бота — /check."
+        )
+        return
     total = await db.get_points(user_id)
     place = next((r[0] for r in await ranking() if r[1] == user_id), None)
 
@@ -296,6 +302,10 @@ async def cmd_track(message: Message, bot: Bot) -> None:
     added = await db.add_exp_track(message.chat.id, thread_of(message), title)
     reset_cache()
     state = "" if await is_active() else "\n\nПодсчёт начнётся после /expstart."
+    from handlers.diagnostics import FIX_TEXT, chat_access
+    ok, _, _ = await chat_access(bot, message.chat.id)
+    if not ok:
+        state += "\n\n⚠️ <b>Бот сейчас не видит обычные сообщения в этом чате</b> — баллы считаться не будут.\n" + FIX_TEXT
     if added:
         await _quiet_confirm(message, bot, f"🧭 Экспедиция будет считать: {_where(message)}.{state}")
     else:
@@ -367,18 +377,59 @@ async def cmd_expstop(message: Message) -> None:
     await message.answer("⏸ Экспедиция на паузе — сообщения не считаются, баллы и рейтинг сохранены.")
 
 
+ADDPOINTS_HELP = (
+    "Как начислить или снять баллы:\n"
+    "• <b>в группе</b>: ответь (reply) на сообщение человека командой <code>/addpoints 10</code> "
+    "(или <code>-10</code>) — команда исчезнет, подтверждение придёт тебе в личку;\n"
+    "• <b>в личке</b>: <code>/addpoints @username 10</code> или <code>/addpoints ID 10</code>."
+)
+
+
+def _amount(text: str) -> int | None:
+    try:
+        value = int(text)
+    except ValueError:
+        return None
+    return value or None
+
+
+async def _apply_points(user_id: int, amount: int, by: int, name: str) -> str:
+    await db.add_points(user_id, amount, "manual", by)
+    total = await db.get_points(user_id)
+    return f"🛠 {amount:+d} для {esc(name)}. Теперь у него {total} балл."
+
+
+@router.message(Command("addpoints"), F.chat.type.in_(GROUPS), IsAdmin())
+async def cmd_addpoints_group(message: Message, command: CommandObject, bot: Bot) -> None:
+    target = message.reply_to_message.from_user if message.reply_to_message else None
+    amount = _amount((command.args or "").strip().split(" ")[0]) if command.args else None
+    if target is None or target.is_bot or amount is None:
+        await _quiet_confirm(message, bot, ADDPOINTS_HELP)
+        return
+    await db.save_user(target.id, target.username, target.full_name)
+    await _quiet_confirm(message, bot, await _apply_points(target.id, amount, message.from_user.id, target.full_name))
+
+
 @router.message(Command("addpoints"), F.chat.type == "private", IsAdmin())
 async def cmd_addpoints(message: Message, command: CommandObject) -> None:
     parts = (command.args or "").split()
-    try:
-        user_id, amount = int(parts[0]), int(parts[1])
-    except (IndexError, ValueError):
-        await message.answer(
-            "Напиши так: <code>/addpoints ID 10</code> — добавить,\n"
-            "<code>/addpoints ID -10</code> — снять (например, за спам).\n"
-            "ID человек узнаёт командой /myid."
-        )
+    amount = _amount(parts[1]) if len(parts) >= 2 else None
+    if amount is None:
+        await message.answer(ADDPOINTS_HELP)
         return
-    await db.add_points(user_id, amount, "manual", message.from_user.id)
-    total = await db.get_points(user_id)
-    await message.answer(f"Готово: {amount:+d} для <code>{user_id}</code>. Теперь у него {total} балл.")
+    who = parts[0]
+    if who.startswith("@"):
+        row = await db.find_user_by_username(who)
+        if row is None:
+            await message.answer(
+                f"Не знаю {esc(who)} — бот ещё не видел его сообщений. "
+                "Проще ответить на его сообщение в группе: <code>/addpoints 10</code>"
+            )
+            return
+        user_id, name = row
+    elif who.lstrip("-").isdigit():
+        user_id, name = int(who), who
+    else:
+        await message.answer(ADDPOINTS_HELP)
+        return
+    await message.answer(await _apply_points(user_id, amount, message.from_user.id, name or str(user_id)))

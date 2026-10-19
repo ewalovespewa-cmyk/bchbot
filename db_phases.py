@@ -139,6 +139,13 @@ async def photo_task_by_post(chat_id: int, message_id: int):
         return await cur.fetchone()
 
 
+async def close_photo_tasks() -> int:
+    async with _connect() as db:
+        cur = await db.execute("UPDATE exp_photo_tasks SET active=0 WHERE active=1")
+        await db.commit()
+        return cur.rowcount
+
+
 async def list_photo_tasks(limit: int = 20):
     async with _connect() as db:
         db.row_factory = aiosqlite.Row

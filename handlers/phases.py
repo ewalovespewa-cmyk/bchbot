@@ -93,6 +93,22 @@ async def in_game_place(message: Message) -> bool:
     return (message.chat.id, 0) in t or (message.chat.id, thread_of(message)) in t
 
 
+async def _blind_warning(bot: Bot) -> str:
+    """Предупреждение, если бот не видит обычные сообщения в чате фаз."""
+    from handlers.diagnostics import FIX_TEXT, chat_access
+
+    chat_id, _ = await phase_chat()
+    if not chat_id:
+        return "\n\n⚠️ Чат для заданий не выбран — отправь /setphasechat (или /setchat) в чате делегатов."
+    try:
+        ok, _, _ = await chat_access(bot, chat_id)
+    except Exception:
+        return ""
+    if ok:
+        return ""
+    return "\n\n⚠️ <b>Бот не видит обычные сообщения и фото в чате делегатов</b> — ответы не засчитаются.\n" + FIX_TEXT
+
+
 async def publish(bot: Bot, text: str) -> Message:
     chat_id, thread_id = await phase_chat()
     if not chat_id:
@@ -106,7 +122,10 @@ async def cmd_setphasechat(message: Message, bot: Bot) -> None:
     await db.set_setting("phase_chat_id", str(message.chat.id))
     await db.set_setting("phase_thread_id", str(thread) if thread else None)
     where = "в эту тему" if thread else "в этот чат"
-    await _quiet_confirm(message, bot, f"🧭 Задания фаз Экспедиции буду публиковать {where} («{esc(message.chat.title)}»).")
+    await _quiet_confirm(
+        message, bot,
+        f"🧭 Задания фаз Экспедиции буду публиковать {where} («{esc(message.chat.title)}»)." + await _blind_warning(bot),
+    )
 
 
 @router.message(Command("setphasechat"), F.chat.type == "private", IsAdmin())
@@ -126,7 +145,8 @@ async def cmd_phase(message: Message, command: CommandObject, bot: Bot) -> None:
             f"🧭 Сейчас: <b>{name}</b>\n\n"
             "Начать фазу: <code>/phase 1</code> (или 2, 3), можно с текстом объявления:\n"
             "<code>/phase 1 Экспедиция начинается! …</code>\n"
-            "Закончить фазу: <code>/phase end</code>"
+            "Закончить фазу: <code>/phase end</code> (можно с текстом: <code>/phase end Спасибо!</code>)\n"
+            "Бот объявит завершение в чате и закроет активные задания фазы. Баллы сохраняются."
         )
         return
     if not await IsAdmin()(message):
@@ -135,10 +155,33 @@ async def cmd_phase(message: Message, command: CommandObject, bot: Bot) -> None:
 
     first, _, text = args.partition(" ")
     if first.lower() in {"end", "0", "стоп", "конец"}:
+        if now not in PHASES:
+            await message.answer("Сейчас никакая фаза не идёт — завершать нечего. Начать: /phase 1")
+            return
+        title = PHASES[now][0]
+        word = await db_phases.active_word_task()
+        closed_words = await db_phases.close_word_tasks()
+        closed_photos = await db_phases.close_photo_tasks()
         await db.set_setting("exp_phase", "0")
+        post = (
+            f"🏁 <b>Экспедиция · {title} завершена!</b>\n\n"
+            f"{esc(text.strip()) or 'Спасибо всем, кто участвовал! Все баллы сохранены — следите за рейтингом: /top'}"
+        )
+        try:
+            await publish(bot, post)
+            published = "✅ Объявление о завершении опубликовано в чат."
+        except Exception as e:
+            published = f"⚠️ Объявление не опубликовано: {esc(str(e))}"
+        closed = []
+        if closed_words and word:
+            closed.append(f"слово «{esc(word['word'])}»")
+        if closed_photos:
+            closed.append(f"фото-заданий: {closed_photos}")
         await message.answer(
-            "⏹ Фаза завершена. Баллы и задания на месте; сообщения в чате продолжают считаться.\n"
-            "Новую фазу — /phase 2 (или 3)."
+            f"⏹ <b>{title} завершена.</b>\n{published}\n"
+            f"Закрыто: {', '.join(closed) if closed else 'активных заданий не было'}.\n\n"
+            "Баллы и рейтинг сохранены, сообщения во «Флуде» продолжают считаться.\n"
+            "Сейчас: <b>между фазами</b>. Следующая — /phase 2 (или 3)."
         )
         return
     if not first.isdigit() or int(first) not in PHASES:
@@ -160,6 +203,7 @@ async def cmd_phase(message: Message, command: CommandObject, bot: Bot) -> None:
     except Exception as e:
         published = f"⚠️ Объявление не опубликовано: {esc(str(e))}"
     extra = "\nЭкспедиция открыта: делегатам доступны /top и /points." if opened_now else ""
+    extra += await _blind_warning(bot)
     await message.answer(f"✅ Началась <b>{title}</b>. {published}{extra}")
     if phase == 3:
         await phase3.on_phase_start(bot)
@@ -270,18 +314,26 @@ class WordAnswer(BaseFilter):
         reply = _reply_to_bot(message, bot)
         if reply is None or user is None or user.is_bot or message.sender_chat:
             return False
-        if (message.text or "").startswith("/") or await is_staff(user.id):
+        if (message.text or "").startswith("/"):
             return False
         task = await db_phases.word_task_by_post(message.chat.id, reply.message_id)
         if task is None or not await is_active():
             return False
-        return {"word_task": task}
+        return {"word_task": task, "oc_test": await is_staff(user.id)}
 
 
 @router.message(F.chat.type.in_(GROUPS), WordAnswer())
-async def on_word_answer(message: Message, bot: Bot, word_task) -> None:
+async def on_word_answer(message: Message, bot: Bot, word_task, oc_test: bool = False) -> None:
     user = message.from_user
     text = message.text or message.caption or ""
+    if oc_test:
+        ok = word_task["active"] and is_sentence(text) and word_matches(text, word_task["word"])
+        await message.reply(
+            "🧪 Проверка OC: " + ("✅ у делегата такой ответ засчитался бы." if ok
+                                  else "❌ такой ответ не засчитался бы.") +
+            " OC баллы не получает."
+        )
+        return
     if not word_task["active"]:
         await message.reply("Это слово уже закрыто — ищи новое задание 😉")
         return
@@ -411,9 +463,7 @@ class PhotoAnswer(BaseFilter):
         task = await db_phases.find_photo_task(_hashtags(message))
         if task is None or not await is_active() or not await in_game_place(message):
             return False
-        if await is_staff(user.id):
-            return False
-        return {"photo_task": task}
+        return {"photo_task": task, "oc_test": await is_staff(user.id)}
 
 
 class PhotoWithoutTag(BaseFilter):
@@ -424,7 +474,7 @@ class PhotoWithoutTag(BaseFilter):
         if reply is None or not _image(message) or message.from_user is None:
             return False
         task = await db_phases.photo_task_by_post(message.chat.id, reply.message_id)
-        if task is None or await is_staff(message.from_user.id):
+        if task is None:
             return False
         return {"photo_task": task}
 
@@ -454,8 +504,14 @@ def _review_caption(sub, decision: str | None = None) -> str:
 
 
 @router.message(F.chat.type.in_(GROUPS), PhotoAnswer())
-async def on_photo_answer(message: Message, bot: Bot, photo_task) -> None:
+async def on_photo_answer(message: Message, bot: Bot, photo_task, oc_test: bool = False) -> None:
     user = message.from_user
+    if oc_test:
+        await message.reply(
+            f"🧪 Проверка OC: фото распознано по #{esc(photo_task['hashtag'])} — "
+            "у делегата оно ушло бы вам на проверку. OC баллы не получает."
+        )
+        return
     await db.save_user(user.id, user.username, user.full_name)
     status = await db_phases.photo_status(photo_task["id"], user.id)
     if status == "approved":

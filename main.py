@@ -8,7 +8,7 @@ from aiogram.enums import ParseMode
 
 import db
 from config import BOT_TOKEN
-from handlers import ExpeditionCounter, get_routers
+from handlers import ExpeditionCounter, diagnostics, get_routers
 from integration import setup_integration
 
 
@@ -25,6 +25,8 @@ async def main() -> None:
     dp.message.outer_middleware(ExpeditionCounter())
 
     await bot.delete_webhook(drop_pending_updates=True)
+    # Если бот не видит сообщения в каком-то чате — напишет админам в личку.
+    await diagnostics.startup_check(bot)
     logging.info("Бот запущен")
     await dp.start_polling(bot)
 
