@@ -34,6 +34,16 @@ async def active_word_task():
         return await cur.fetchone()
 
 
+async def word_task_by_post(chat_id: int, message_id: int):
+    """Задание-слово, на пост которого ответили (активное или уже закрытое)."""
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM exp_word_tasks WHERE post_chat_id=? AND post_message_id=?", (chat_id, message_id)
+        )
+        return await cur.fetchone()
+
+
 async def close_word_tasks() -> int:
     async with _connect() as db:
         cur = await db.execute("UPDATE exp_word_tasks SET active=0 WHERE active=1")
@@ -107,25 +117,26 @@ async def set_photo_active(hashtag: str, active: bool) -> bool:
         return cur.rowcount > 0
 
 
-async def find_photo_task(hashtags: list[str], reply_chat_id: int | None, reply_message_id: int | None):
-    """Активное фото-задание по хэштегу из подписи или по посту, на который ответили."""
+async def find_photo_task(hashtags: list[str]):
+    """Активное фото-задание по хэштегу из подписи."""
+    if not hashtags:
+        return None
+    marks = ",".join("?" * len(hashtags))
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
-        if hashtags:
-            marks = ",".join("?" * len(hashtags))
-            cur = await db.execute(
-                f"SELECT * FROM exp_photo_tasks WHERE active=1 AND hashtag IN ({marks}) ORDER BY id", hashtags
-            )
-            row = await cur.fetchone()
-            if row:
-                return row
-        if reply_message_id is not None:
-            cur = await db.execute(
-                "SELECT * FROM exp_photo_tasks WHERE active=1 AND post_chat_id=? AND post_message_id=?",
-                (reply_chat_id, reply_message_id),
-            )
-            return await cur.fetchone()
-    return None
+        cur = await db.execute(
+            f"SELECT * FROM exp_photo_tasks WHERE active=1 AND hashtag IN ({marks}) ORDER BY id", hashtags
+        )
+        return await cur.fetchone()
+
+
+async def photo_task_by_post(chat_id: int, message_id: int):
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            "SELECT * FROM exp_photo_tasks WHERE post_chat_id=? AND post_message_id=?", (chat_id, message_id)
+        )
+        return await cur.fetchone()
 
 
 async def list_photo_tasks(limit: int = 20):

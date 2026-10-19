@@ -7,14 +7,16 @@
                       Если Экспедиция ещё скрыта — она открывается и запускается.
   /phase end        — закончить текущую фазу (пауза между фазами, баллы на месте).
 
-Фаза 1 — слова. OC: /word кофе [баллы] [текст]. Бот публикует задание; делегат пишет
-предложение (от PHASE_WORD_MIN_WORDS слов) с этим словом — бот сам проверяет, ставит 👍
-и начисляет баллы. Один раз на человека за слово. Новое слово закрывает предыдущее.
+Фаза 1 — слова. OC: /word кофе [баллы] [текст]. Бот публикует задание; делегат ОТВЕЧАЕТ
+(reply) на пост бота предложением (от PHASE_WORD_MIN_WORDS слов) с этим словом — бот сам
+проверяет, ставит 👍 и начисляет баллы. Обычные сообщения без reply не считаются заданием.
+Один раз на человека за слово. Новое слово закрывает предыдущее.
 Падежи засчитываются: «кружка» → «кружкой», «кофе» → «кофейку».
 
 Фаза 2 — фото (своя «пародия» на ФотоХант, сам ФотоХант не трогаем).
-OC: /photo #тег [баллы] текст. Делегат отвечает фото на пост задания или шлёт фото
-с хэштегом. Фото уходит OC на проверку ✅/❌, при одобрении — баллы. Можно несколько
+OC: /photo #тег [баллы] текст. Делегат шлёт фото С ХЭШТЕГОМ в подписи (обязательно).
+Фото уходит OC на проверку ✅/❌, при одобрении — баллы. Фото ответом на пост без хэштега
+не принимается — бот подсказывает, какой хэштег добавить. Можно несколько
 заданий одновременно, каждое — один раз на человека.
 
 Фаза 3 — финал, каркас в handlers/phase3.py.
@@ -51,8 +53,10 @@ GROUPS = {"group", "supergroup"}
 HASHTAG_RE = re.compile(r"^#?(\w{2,64})$")
 
 PHASES = {
-    1: ("Фаза 1", "Каждый день OC будет давать слово — пишите в чат предложение с ним и получайте баллы ✍️"),
-    2: ("Фаза 2", "Время фото-заданий 📸 Присылайте фото ответом на пост с заданием — после проверки OC начислим баллы."),
+    1: ("Фаза 1", "Каждый день OC будет давать слово ✍️ Отвечайте (reply) на сообщение бота с заданием "
+                  "предложением с этим словом — и получайте баллы!"),
+    2: ("Фаза 2", "Время фото-заданий 📸 Присылайте фото с хэштегом из задания в подписи — "
+                  "после проверки OC начислим баллы."),
     3: ("Фаза 3 — финал", "Финальная фаза Экспедиции! Подробности — совсем скоро 🔥"),
 }
 
@@ -213,10 +217,14 @@ async def cmd_word(message: Message, command: CommandObject, bot: Bot) -> None:
     word = word.strip("«»\"'")
     points, text = _split_points(rest, PHASE_WORD_POINTS)
     if not text:
-        text = f"Напишите в чат предложение со словом «{word}»"
+        text = f"Напишите предложение со словом «{word}»"
 
     task_id = await db_phases.create_word_task(word, text, points, await current_phase(), message.from_user.id)
-    post = f"✍️ <b>Задание Экспедиции</b>\n\n{esc(text)}\n\nЗа выполнение: <b>+{points}</b> 🧭"
+    post = (
+        f"✍️ <b>Задание Экспедиции</b>\n\n{esc(text)}\n\n"
+        f"↩️ Ответь (reply) на это сообщение — иначе не засчитается.\n"
+        f"За выполнение: <b>+{points}</b> 🧭"
+    )
     try:
         sent = await publish(bot, post)
     except Exception as e:
@@ -246,21 +254,26 @@ async def cmd_words(message: Message) -> None:
     await message.answer("<b>Задания со словами</b> (последние):\n\n" + "\n".join(lines))
 
 
-class WordAnswer(BaseFilter):
-    """Пропускает сообщение, если это засчитываемый ответ на активное слово.
-    Остальные сообщения проходят дальше к другим хендлерам (ФотоХант и т. д.)."""
+def _reply_to_bot(message: Message, bot: Bot):
+    reply = message.reply_to_message
+    if reply and reply.from_user and reply.from_user.id == bot.id:
+        return reply
+    return None
 
-    async def __call__(self, message: Message) -> bool | dict:
+
+class WordAnswer(BaseFilter):
+    """Пропускает только ответы (reply) на пост бота с заданием-словом.
+    Обычные сообщения проходят дальше к другим хендлерам."""
+
+    async def __call__(self, message: Message, bot: Bot) -> bool | dict:
         user = message.from_user
-        text = message.text or message.caption or ""
-        if not text or text.startswith("/") or user is None or user.is_bot or message.sender_chat:
+        reply = _reply_to_bot(message, bot)
+        if reply is None or user is None or user.is_bot or message.sender_chat:
             return False
-        task = await db_phases.active_word_task()
-        if task is None or not await is_active() or not await in_game_place(message):
+        if (message.text or "").startswith("/") or await is_staff(user.id):
             return False
-        if not is_sentence(text) or not word_matches(text, task["word"]):
-            return False
-        if await is_staff(user.id) or await db_phases.word_done(task["id"], user.id):
+        task = await db_phases.word_task_by_post(message.chat.id, reply.message_id)
+        if task is None or not await is_active():
             return False
         return {"word_task": task}
 
@@ -268,6 +281,19 @@ class WordAnswer(BaseFilter):
 @router.message(F.chat.type.in_(GROUPS), WordAnswer())
 async def on_word_answer(message: Message, bot: Bot, word_task) -> None:
     user = message.from_user
+    text = message.text or message.caption or ""
+    if not word_task["active"]:
+        await message.reply("Это слово уже закрыто — ищи новое задание 😉")
+        return
+    if await db_phases.word_done(word_task["id"], user.id):
+        await message.reply("Это слово у тебя уже засчитано 👌")
+        return
+    if not is_sentence(text) or not word_matches(text, word_task["word"]):
+        await message.reply(
+            f"Не засчитано: нужно предложение (от {PHASE_WORD_MIN_WORDS} слов) "
+            f"со словом «{esc(word_task['word'])}» ✍️"
+        )
+        return
     await db.save_user(user.id, user.username, user.full_name)
     if not await db_phases.complete_word(word_task["id"], user.id, message.chat.id, message.message_id, word_task["points"]):
         return
@@ -313,7 +339,7 @@ async def cmd_photo(message: Message, command: CommandObject, bot: Bot) -> None:
         await message.answer(
             "Напиши так:\n<code>/photo #кружка Сфоткайся с кружкой</code>\n"
             f"<code>/photo #кружка 15 Сфоткайся с кружкой</code> — за 15 баллов (по умолчанию {PHASE_PHOTO_POINTS})\n\n"
-            "Делегаты отвечают фото на пост задания или шлют фото с этим хэштегом. "
+            "Делегаты шлют фото с этим хэштегом в подписи (обязательно). "
             "Фото придут сюда на проверку ✅/❌."
         )
         return
@@ -326,7 +352,7 @@ async def cmd_photo(message: Message, command: CommandObject, bot: Bot) -> None:
         return
     post = (
         f"📸 <b>Фото-задание Экспедиции</b>\n\n{esc(text)}\n\n"
-        f"Ответь фото на это сообщение (или пришли фото с #{esc(hashtag)}).\n"
+        f"Пришли фото с хэштегом <b>#{esc(hashtag)}</b> в подписи — без хэштега не засчитается.\n"
         f"За засчитанное фото: <b>+{points}</b> 🧭"
     )
     try:
@@ -376,21 +402,29 @@ async def cmd_photoopen(message: Message, command: CommandObject) -> None:
 
 
 class PhotoAnswer(BaseFilter):
-    """Фото на задание Экспедиции. Чужие фото (например, для ФотоХанта) проходят дальше."""
+    """Фото с хэштегом фото-задания Экспедиции. Остальные фото (ФотоХант) проходят дальше."""
 
     async def __call__(self, message: Message) -> bool | dict:
         user = message.from_user
         if user is None or user.is_bot or message.sender_chat or not _image(message):
             return False
-        reply = message.reply_to_message
-        task = await db_phases.find_photo_task(
-            _hashtags(message),
-            message.chat.id if reply else None,
-            reply.message_id if reply else None,
-        )
+        task = await db_phases.find_photo_task(_hashtags(message))
         if task is None or not await is_active() or not await in_game_place(message):
             return False
         if await is_staff(user.id):
+            return False
+        return {"photo_task": task}
+
+
+class PhotoWithoutTag(BaseFilter):
+    """Фото ответом на пост фото-задания, но без его хэштега — подскажем."""
+
+    async def __call__(self, message: Message, bot: Bot) -> bool | dict:
+        reply = _reply_to_bot(message, bot)
+        if reply is None or not _image(message) or message.from_user is None:
+            return False
+        task = await db_phases.photo_task_by_post(message.chat.id, reply.message_id)
+        if task is None or await is_staff(message.from_user.id):
             return False
         return {"photo_task": task}
 
@@ -441,6 +475,17 @@ async def on_photo_answer(message: Message, bot: Bot, photo_task) -> None:
             await db_phases.add_photo_review_msg(sub_id, staff_id, sent.message_id)
         except Exception:
             log.warning("Фото Экспедиции не доставлено OC %s (нет /start?)", staff_id)
+
+
+@router.message(F.chat.type.in_(GROUPS), PhotoWithoutTag())
+async def on_photo_without_tag(message: Message, photo_task) -> None:
+    if not photo_task["active"]:
+        await message.reply("Это фото-задание уже закрыто 😉")
+        return
+    await message.reply(
+        f"Добавь в подпись хэштег <b>#{esc(photo_task['hashtag'])}</b> и пришли фото ещё раз — "
+        "без хэштега не засчитаю 📸"
+    )
 
 
 @router.callback_query(F.data.startswith("ep:"))
