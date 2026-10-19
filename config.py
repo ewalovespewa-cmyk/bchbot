@@ -1,5 +1,6 @@
 """Настройки бота. Все секреты берутся из переменных окружения (на Railway — вкладка Variables)."""
 import os
+from datetime import timedelta, timezone
 
 from dotenv import load_dotenv
 
@@ -16,3 +17,16 @@ ADMIN_IDS = {
 
 # Где хранить базу. На Railway это /data/bot.db (постоянный диск).
 DB_PATH = os.getenv("DB_PATH", "data/bot.db")
+
+# Часовой пояс проекта: «день» для ФотоХанта считается по нему. Казахстан — UTC+5.
+LOCAL_TZ = timezone(timedelta(hours=int(os.getenv("TZ_OFFSET_HOURS", "5"))))
+
+# ---- Экспедиция: сколько стоит каждое действие ----
+EXP_MESSAGE_POINTS = int(os.getenv("EXP_MESSAGE_POINTS", "1"))   # любое сообщение, стикер
+EXP_VOICE_POINTS = int(os.getenv("EXP_VOICE_POINTS", "3"))       # голосовое или кружок
+EXP_PHOTOHUNT_DAY_POINTS = int(os.getenv("EXP_PHOTOHUNT_DAY_POINTS", "5"))  # день с засчитанным фото
+# Антиспам: сообщения одного человека чаще, чем раз в N секунд, не считаются (0 — выключить)
+EXP_COOLDOWN_SECONDS = float(os.getenv("EXP_COOLDOWN_SECONDS", "2"))
+# Сколько мест в лидерборде и сколько из них с главными подарками
+EXP_TOP_SIZE = int(os.getenv("EXP_TOP_SIZE", "15"))
+EXP_PRIZE_PLACES = int(os.getenv("EXP_PRIZE_PLACES", "10"))

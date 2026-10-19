@@ -11,24 +11,29 @@ router.message.filter(F.chat.type == "private")
 
 HELP_USER = (
     "/start — начать\n"
-    "/points — мои баллы\n"
+    "/top — лидерборд Экспедиции 🧭\n"
+    "/points — мои баллы и место\n"
     "/myid — узнать свой Telegram ID\n"
     "/help — список команд"
 )
 HELP_STAFF = (
     "\n\n<b>📸 ФотоХант (для OC):</b>\n"
     "/task #хэштег текст — опубликовать задание в чат делегатов\n"
-    "/task #хэштег 5 текст — то же, задание на 5 баллов\n"
     "/tasks — все задания и статистика\n"
     "/close #хэштег — перестать принимать фото\n"
     "/open #хэштег — снова принимать фото\n"
-    "/top — рейтинг по баллам\n"
-    "/stats — сколько людей в базе бота\n\n"
-    "Фото с хэштегами из чата будут приходить сюда с кнопками ✅ / ❌."
+    "Фото с хэштегами из чата будут приходить сюда с кнопками ✅ / ❌.\n\n"
+    "<b>🧭 Экспедиция (для OC):</b>\n"
+    "/top — лидерборд (в чате — опубликовать его для всех)\n"
+    "/chats — какие чаты считаются\n"
+    "/stats — сколько людей в базе бота"
 )
 HELP_ADMIN = (
     "\n\n<b>Только для админа:</b>\n"
-    "/setchat — отправь в чате делегатов, чтобы бот работал там\n"
+    "/setchat — в чате: принимать здесь фото ФотоХанта\n"
+    "/track, /untrack — в чате: считать / не считать его сообщения\n"
+    "/expstart, /expstop — запустить / поставить Экспедицию на паузу\n"
+    "/addpoints ID 10 — добавить баллы (или -10 — снять)\n"
     "/addmod ID — назначить модератора\n"
     "/delmod ID — снять модератора\n"
     "/mods — список модераторов"
@@ -63,9 +68,3 @@ async def cmd_help(message: Message) -> None:
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
     await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")
-
-
-@router.message(Command("points"))
-async def cmd_points(message: Message) -> None:
-    total = await db.get_points(message.from_user.id)
-    await message.answer(f"⭐ У тебя <b>{total}</b> балл(ов).")

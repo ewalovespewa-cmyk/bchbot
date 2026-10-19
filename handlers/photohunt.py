@@ -3,11 +3,13 @@
 Как это работает:
 1. Админ в чате делегатов пишет /setchat — бот запоминает, куда публиковать задания
    и где ловить фото (если чат с темами — запоминается именно эта тема).
-2. OC пишет боту в личку: /task #хэштег [баллы] текст задания — бот публикует задание в чат.
+2. OC пишет боту в личку: /task #хэштег текст задания — бот публикует задание в чат.
 3. Делегат кидает в чат фото с этим хэштегом в подписи.
 4. Бот присылает фото админу и всем модераторам в личку с кнопками ✅ / ❌.
 5. Первый, кто нажал, принимает решение: у остальных сообщение обновляется,
-   делегату бот отвечает в чате, за одобренное фото начисляются баллы.
+   делегату бот отвечает в чате.
+6. Связь с Экспедицией: за каждый день, когда у человека засчитали хотя бы одно фото,
+   он получает бонус EXP_PHOTOHUNT_DAY_POINTS (по умолчанию +5). День — когда фото прислали.
 """
 import html
 import logging
@@ -24,12 +26,12 @@ from aiogram.types import (
 )
 
 import db
+from config import EXP_PHOTOHUNT_DAY_POINTS, LOCAL_TZ
 from roles import IsAdmin, IsStaff, is_staff, staff_ids
 
 router = Router()
 log = logging.getLogger(__name__)
 
-SOURCE = "photohunt"
 HASHTAG_RE = re.compile(r"^#?(\w{2,64})$")
 
 
@@ -64,20 +66,15 @@ async def cmd_setchat_private(message: Message) -> None:
 
 # ---------------------------------------------------------------- задания (для OC, в личке)
 
-def parse_task_args(args: str | None) -> tuple[str, int, str] | None:
-    """'#селфи 5 Сфоткайся с ментором' -> ('селфи', 5, 'Сфоткайся с ментором')."""
+def parse_task_args(args: str | None) -> tuple[str, str] | None:
+    """'#селфи Сфоткайся с ментором' -> ('селфи', 'Сфоткайся с ментором')."""
     parts = (args or "").split(maxsplit=1)
     if len(parts) < 2:
         return None
     m = HASHTAG_RE.match(parts[0])
-    if not m:
+    if not m or not parts[1].strip():
         return None
-    hashtag, rest = m.group(1).lower(), parts[1].strip()
-    points = 1
-    first, _, tail = rest.partition(" ")
-    if first.isdigit() and tail.strip():
-        points, rest = int(first), tail.strip()
-    return hashtag, points, rest
+    return m.group(1).lower(), parts[1].strip()
 
 
 @router.message(Command("task"), F.chat.type == "private", IsStaff())
@@ -85,13 +82,11 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
     parsed = parse_task_args(command.args)
     if not parsed:
         await message.answer(
-            "Напиши так:\n<code>/task #хэштег текст задания</code>\n"
-            "или с баллами:\n<code>/task #хэштег 5 текст задания</code>\n\n"
-            "Хэштег — одно слово без пробелов (буквы, цифры, _). "
-            "По умолчанию задание стоит 1 балл."
+            "Напиши так:\n<code>/task #хэштег текст задания</code>\n\n"
+            "Хэштег — одно слово без пробелов (буквы, цифры, _)."
         )
         return
-    hashtag, points, text = parsed
+    hashtag, text = parsed
 
     chat_id, thread_id = await get_photo_chat()
     if not chat_id:
@@ -100,7 +95,7 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
         )
         return
 
-    task_id = await db.create_task(hashtag, text, points, message.from_user.id)
+    task_id = await db.create_task(hashtag, text, 0, message.from_user.id)
     if task_id is None:
         await message.answer(f"Задание с хэштегом #{esc(hashtag)} уже есть. Придумай другой.")
         return
@@ -109,7 +104,7 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
         "📸 <b>Новое задание ФотоХанта!</b>\n\n"
         f"{esc(text)}\n\n"
         f"Присылайте фото в этот чат с хэштегом #{esc(hashtag)} в подписи.\n"
-        f"За засчитанное фото: <b>{points}</b> балл(ов)."
+        f"Засчитанное фото = <b>+{EXP_PHOTOHUNT_DAY_POINTS}</b> в Экспедицию (бонус раз в день) 🧭"
     )
     try:
         await bot.send_message(chat_id, post, message_thread_id=thread_id)
@@ -136,7 +131,7 @@ async def cmd_tasks(message: Message) -> None:
         state = "🟢" if t["active"] else "⚪️ закрыто"
         lines.append(
             f"{state} #{esc(t['hashtag'])} — {esc(t['text'])}\n"
-            f"    {t['points']} балл. · засчитано: {t['approved']} · ждут проверки: {t['pending']}"
+            f"    засчитано: {t['approved']} · ждут проверки: {t['pending']}"
         )
     await message.answer("<b>Задания ФотоХанта:</b>\n\n" + "\n\n".join(lines))
 
@@ -165,21 +160,6 @@ async def cmd_close(message: Message, command: CommandObject) -> None:
 @router.message(Command("open"), IsStaff())
 async def cmd_open(message: Message, command: CommandObject) -> None:
     await _toggle_task(message, command, True)
-
-
-@router.message(Command("top"), IsStaff())
-async def cmd_top(message: Message) -> None:
-    rows = await db.leaderboard(20)
-    if not rows:
-        await message.answer("Баллов пока ни у кого нет.")
-        return
-    lines = []
-    for i, (user_id, full_name, username, total) in enumerate(rows, 1):
-        name = esc(full_name) or str(user_id)
-        if username:
-            name += f" (@{esc(username)})"
-        lines.append(f"{i}. {name} — <b>{total}</b>")
-    await message.answer("🏆 <b>Рейтинг:</b>\n\n" + "\n".join(lines))
 
 
 # ---------------------------------------------------------------- ловим фото в чате делегатов
@@ -230,7 +210,6 @@ def review_caption(sub, decision: str | None = None) -> str:
     lines = [
         f"📸 <b>#{esc(sub['hashtag'])}</b> — {esc(sub['task_text'])}",
         f"От: {who}",
-        f"Баллы: {sub['points']}",
     ]
     link = message_link(sub["chat_id"], sub["message_id"], None)
     if link:
@@ -267,8 +246,9 @@ async def on_group_photo(message: Message, bot: Bot) -> None:
         return
 
     file_id, is_document = image
+    day = message.date.astimezone(LOCAL_TZ).date().isoformat()
     sub_id = await db.create_submission(
-        task["id"], user.id, message.chat.id, message.message_id, file_id, is_document
+        task["id"], user.id, message.chat.id, message.message_id, file_id, is_document, day
     )
     sub = await db.get_submission(sub_id)
     caption = review_caption(sub)
@@ -311,8 +291,10 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     sub = await db.get_submission(sub_id)
+    bonus = False
     if approved:
-        await db.add_points(sub["user_id"], sub["points"], SOURCE, sub_id)
+        day = sub["day"] or sub["created_at"][:10]
+        bonus = await db.award_photohunt_day(sub["user_id"], day, sub_id, EXP_PHOTOHUNT_DAY_POINTS)
 
     reviewer = esc(callback.from_user.full_name)
     decision = f"✅ Засчитал(а): {reviewer}" if approved else f"❌ Отклонил(а): {reviewer}"
@@ -326,7 +308,11 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
             log.warning("Не смог обновить сообщение проверки у %s", chat_id)
 
     if approved:
-        reply = f"✅ Фото засчитано! +{sub['points']} балл(ов) за #{esc(sub['hashtag'])}"
+        reply = f"✅ Фото по заданию #{esc(sub['hashtag'])} засчитано!"
+        if bonus:
+            reply += f"\n🧭 +{EXP_PHOTOHUNT_DAY_POINTS} в Экспедицию за участие в ФотоХанте сегодня"
+        else:
+            reply += "\n(бонус Экспедиции за этот день уже получен)"
     else:
         reply = f"❌ Фото по заданию #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
     try:

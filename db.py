@@ -52,7 +52,29 @@ CREATE TABLE IF NOT EXISTS review_messages (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL
 );
--- Общий журнал баллов. Сюда же потом будет писать вторая механика.
+-- Экспедиция: чаты, где считаются сообщения
+CREATE TABLE IF NOT EXISTS exp_chats (
+    chat_id INTEGER PRIMARY KEY,
+    title TEXT,
+    added_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+-- Экспедиция: счётчики сообщений по людям и дням
+CREATE TABLE IF NOT EXISTS exp_messages (
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,                 -- YYYY-MM-DD по времени проекта
+    messages INTEGER NOT NULL DEFAULT 0,
+    voices INTEGER NOT NULL DEFAULT 0, -- голосовые и кружки
+    points INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day)
+);
+-- Экспедиция: дни, когда у человека засчитали фото в ФотоХанте (бонус раз в день)
+CREATE TABLE IF NOT EXISTS exp_photohunt_days (
+    user_id INTEGER NOT NULL,
+    day TEXT NOT NULL,
+    submission_id INTEGER,
+    PRIMARY KEY (user_id, day)
+);
+-- Общий журнал баллов (бонусы ФотоХанта, ручные корректировки OC и т. п.)
 CREATE TABLE IF NOT EXISTS points_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
@@ -72,6 +94,10 @@ async def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     async with _connect() as db:
         await db.executescript(SCHEMA)
+        # Миграция: день отправки фото (для бонуса Экспедиции). В старых базах колонки нет.
+        cur = await db.execute("PRAGMA table_info(photo_submissions)")
+        if "day" not in [r[1] for r in await cur.fetchall()]:
+            await db.execute("ALTER TABLE photo_submissions ADD COLUMN day TEXT")
         await db.commit()
 
 
@@ -230,12 +256,12 @@ async def user_has_pending(task_id: int, user_id: int) -> bool:
         return await cur.fetchone() is not None
 
 
-async def create_submission(task_id, user_id, chat_id, message_id, file_id, is_document) -> int:
+async def create_submission(task_id, user_id, chat_id, message_id, file_id, is_document, day) -> int:
     async with _connect() as db:
         cur = await db.execute(
-            "INSERT INTO photo_submissions (task_id, user_id, chat_id, message_id, file_id, is_document) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            (task_id, user_id, chat_id, message_id, file_id, int(is_document)),
+            "INSERT INTO photo_submissions (task_id, user_id, chat_id, message_id, file_id, is_document, day) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (task_id, user_id, chat_id, message_id, file_id, int(is_document), day),
         )
         await db.commit()
         return cur.lastrowid
@@ -298,21 +324,113 @@ async def add_points(user_id: int, amount: int, source: str, ref_id: int | None 
         await db.commit()
 
 
+# Итог человека = баллы за сообщения + всё из журнала (бонусы ФотоХанта, корректировки OC).
+_SCORES_SQL = """
+    SELECT user_id, SUM(points) AS pts FROM exp_messages GROUP BY user_id
+    UNION ALL
+    SELECT user_id, SUM(amount) AS pts FROM points_log GROUP BY user_id
+"""
+
+
 async def get_points(user_id: int) -> int:
     async with _connect() as db:
         cur = await db.execute(
-            "SELECT COALESCE(SUM(amount), 0) FROM points_log WHERE user_id=?", (user_id,)
+            f"SELECT COALESCE(SUM(pts), 0) FROM ({_SCORES_SQL}) WHERE user_id=?", (user_id,)
         )
         return (await cur.fetchone())[0]
 
 
-async def leaderboard(limit: int = 20):
+async def all_scores():
+    """Все участники с баллами, по убыванию. Равные баллы — в стабильном порядке (по ID),
+    чтобы места не «прыгали»; спорные места у границы призов OC решает вручную."""
     async with _connect() as db:
         cur = await db.execute(
-            """SELECT p.user_id, u.full_name, u.username, SUM(p.amount) AS total
-               FROM points_log p LEFT JOIN users u ON u.user_id = p.user_id
-               GROUP BY p.user_id HAVING total <> 0
-               ORDER BY total DESC LIMIT ?""",
-            (limit,),
+            f"""SELECT s.user_id, u.full_name, u.username, SUM(s.pts) AS total
+                FROM ({_SCORES_SQL}) s LEFT JOIN users u ON u.user_id = s.user_id
+                GROUP BY s.user_id HAVING total > 0
+                ORDER BY total DESC, s.user_id"""
         )
         return await cur.fetchall()
+
+
+async def points_breakdown(user_id: int) -> dict:
+    async with _connect() as db:
+        cur = await db.execute(
+            "SELECT COALESCE(SUM(messages),0), COALESCE(SUM(voices),0), COALESCE(SUM(points),0) "
+            "FROM exp_messages WHERE user_id=?",
+            (user_id,),
+        )
+        messages, voices, msg_points = await cur.fetchone()
+        cur = await db.execute(
+            "SELECT source, COALESCE(SUM(amount),0), COUNT(*) FROM points_log WHERE user_id=? GROUP BY source",
+            (user_id,),
+        )
+        by_source = {src: (total, cnt) for src, total, cnt in await cur.fetchall()}
+    return {
+        "messages": messages,
+        "voices": voices,
+        "message_points": msg_points,
+        "photohunt_days": by_source.get("photohunt_day", (0, 0))[1],
+        "photohunt_points": by_source.get("photohunt_day", (0, 0))[0],
+        "adjust_points": by_source.get("manual", (0, 0))[0],
+    }
+
+
+# ---------- Экспедиция ----------
+
+async def add_exp_chat(chat_id: int, title: str | None) -> bool:
+    async with _connect() as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO exp_chats (chat_id, title) VALUES (?, ?)", (chat_id, title)
+        )
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def remove_exp_chat(chat_id: int) -> bool:
+    async with _connect() as db:
+        cur = await db.execute("DELETE FROM exp_chats WHERE chat_id=?", (chat_id,))
+        await db.commit()
+        return cur.rowcount > 0
+
+
+async def exp_chat_ids() -> set[int]:
+    async with _connect() as db:
+        cur = await db.execute("SELECT chat_id FROM exp_chats")
+        return {r[0] for r in await cur.fetchall()}
+
+
+async def list_exp_chats():
+    async with _connect() as db:
+        cur = await db.execute("SELECT chat_id, title FROM exp_chats ORDER BY added_at")
+        return await cur.fetchall()
+
+
+async def add_exp_message(user_id: int, day: str, is_voice: bool, points: int) -> None:
+    async with _connect() as db:
+        await db.execute(
+            """INSERT INTO exp_messages (user_id, day, messages, voices, points) VALUES (?, ?, ?, ?, ?)
+               ON CONFLICT(user_id, day) DO UPDATE SET
+                 messages = messages + excluded.messages,
+                 voices = voices + excluded.voices,
+                 points = points + excluded.points""",
+            (user_id, day, 0 if is_voice else 1, 1 if is_voice else 0, points),
+        )
+        await db.commit()
+
+
+async def award_photohunt_day(user_id: int, day: str, submission_id: int, points: int) -> bool:
+    """+бонус за день ФотоХанта. False — за этот день бонус уже был."""
+    async with _connect() as db:
+        cur = await db.execute(
+            "INSERT OR IGNORE INTO exp_photohunt_days (user_id, day, submission_id) VALUES (?, ?, ?)",
+            (user_id, day, submission_id),
+        )
+        if cur.rowcount == 0:
+            return False
+        await db.execute(
+            "INSERT INTO points_log (user_id, amount, source, ref_id) VALUES (?, ?, 'photohunt_day', ?)",
+            (user_id, points, submission_id),
+        )
+        await db.commit()
+        return True
