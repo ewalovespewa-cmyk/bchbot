@@ -28,12 +28,25 @@ Python 3.12 + aiogram 3, база SQLite, хостинг Railway.
 Все баллы пишутся в общий журнал `points_log` с пометкой источника (`photohunt` и т. д.),
 так что другие механики подключаются к тому же рейтингу.
 
+## Интеграция с ботом регистрации
+Играть могут только участники, активировавшие бота регистрации ([bc2regbot](https://github.com/ewalovespewa-cmyk/bc2regbot)).
+Бинго (на проекте) — только отметившиеся на входе. Подробно: [integration/README.md](integration/README.md).
+
+Подключено одной строкой в `main.py` (`await setup_integration(dp)`); код игр не менялся.
+Без переменной `BC_API_URL` интеграция выключена и бот работает как раньше.
+
 ## Переменные окружения
 | Имя | Пример | Описание |
 |---|---|---|
 | `BOT_TOKEN` | `123:AAH...` | токен от @BotFather (секрет!) |
 | `ADMIN_IDS` | `1999072927` | ID админов через запятую |
 | `DB_PATH` | `/data/bot.db` | путь к базе; на Railway — на постоянном диске `/data` |
+| `BC_API_URL` | `http://bc2regbot.railway.internal:8080` | адрес бота регистрации; пусто — интеграция выключена |
+| `BC_API_TOKEN` | — | = `INTEGRATION_TOKEN` бота регистрации (секрет) |
+| `BC_WEBHOOK_SECRET` | — | = `GAMIFICATION_WEBHOOK_SECRET` бота регистрации (секрет) |
+| `BC_REG_BOT_USERNAME` | `businesscup2_regbot` | для подсказки «сначала активируй бота участника» |
+| `BC_AUTO_APPROVE_JOIN` | `0` | `1` — одобрять заявки в общий чат только активировавшим |
+| `PORT` | `8080` | порт приёма событий `POST /bc-events` (Railway задаёт сам) |
 
 ## Структура
 ```
@@ -43,6 +56,8 @@ db.py              база данных
 roles.py           роли и фильтры доступа
 handlers/common.py команды для всех
 handlers/admin.py  команды админа и модераторов
+integration/       связь с ботом регистрации: гейт доступа, события, фильтр бинго
+tests/             тесты интеграции (pip install -r requirements-dev.txt && pytest)
 ```
 
 ## Локальный запуск
