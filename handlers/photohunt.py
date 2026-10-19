@@ -10,6 +10,7 @@
    делегату бот отвечает в чате.
 6. Связь с Экспедицией: за каждый день, когда у человека засчитали хотя бы одно фото,
    он получает бонус EXP_PHOTOHUNT_DAY_POINTS (по умолчанию +5). День — когда фото прислали.
+   Дни копятся всегда, но пока Экспедиция скрыта, в текстах о ней не говорим.
 """
 import html
 import logging
@@ -27,6 +28,7 @@ from aiogram.types import (
 
 import db
 from config import EXP_PHOTOHUNT_DAY_POINTS, LOCAL_TZ
+from handlers.expedition import is_revealed
 from roles import IsAdmin, IsStaff, is_staff, staff_ids
 
 router = Router()
@@ -103,9 +105,10 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
     post = (
         "📸 <b>Новое задание ФотоХанта!</b>\n\n"
         f"{esc(text)}\n\n"
-        f"Присылайте фото в этот чат с хэштегом #{esc(hashtag)} в подписи.\n"
-        f"Засчитанное фото = <b>+{EXP_PHOTOHUNT_DAY_POINTS}</b> в Экспедицию (бонус раз в день) 🧭"
+        f"Присылайте фото в этот чат с хэштегом #{esc(hashtag)} в подписи."
     )
+    if await is_revealed():
+        post += f"\nЗасчитанное фото = <b>+{EXP_PHOTOHUNT_DAY_POINTS}</b> в Экспедицию (бонус раз в день) 🧭"
     try:
         await bot.send_message(chat_id, post, message_thread_id=thread_id)
     except Exception as e:
@@ -309,10 +312,11 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
 
     if approved:
         reply = f"✅ Фото по заданию #{esc(sub['hashtag'])} засчитано!"
-        if bonus:
-            reply += f"\n🧭 +{EXP_PHOTOHUNT_DAY_POINTS} в Экспедицию за участие в ФотоХанте сегодня"
-        else:
-            reply += "\n(бонус Экспедиции за этот день уже получен)"
+        if await is_revealed():
+            if bonus:
+                reply += f"\n🧭 +{EXP_PHOTOHUNT_DAY_POINTS} в Экспедицию за участие в ФотоХанте сегодня"
+            else:
+                reply += "\n(бонус Экспедиции за этот день уже получен)"
     else:
         reply = f"❌ Фото по заданию #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
     try:

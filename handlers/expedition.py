@@ -1,16 +1,21 @@
-"""Экспедиция — игра на весь проект: чем больше общаешься в чатах, тем выше в лидерборде.
+"""Экспедиция — игра на весь проект: чем больше общаешься, тем выше в лидерборде.
 
 Баллы:
 - любое сообщение (текст, стикер, фото, гиф…) — EXP_MESSAGE_POINTS (1)
 - голосовое или кружок — EXP_VOICE_POINTS (3)
 - день, когда в ФотоХанте засчитали хотя бы одно фото — EXP_PHOTOHUNT_DAY_POINTS (5),
-  начисляется в handlers/photohunt.py
+  начисляется в handlers/photohunt.py (дни копятся всегда, даже пока Экспедиция скрыта)
 - ручные корректировки OC — /addpoints
 
-Считаются сообщения только в подключённых чатах (/track в чате), только от участников
-(не OC, не ботов) и только пока Экспедиция идёт (/expstart, /expstop).
-Если включена интеграция с ботом регистрации, подсчёт стоит ПОСЛЕ её фильтра доступа,
-поэтому баллы получают только активировавшие бота регистрации.
+Секретность: до первого /expstart Экспедиция скрыта. Делегатам /top и /points не отвечают
+(как на несуществующую команду), в /help и текстах ФотоХанта она не упоминается,
+сообщения не считаются. После /expstart — открыта; /expstop ставит на паузу (рейтинг виден).
+
+Где считаются сообщения: только там, где админ отправил /track. В чате с темами /track,
+отправленный внутри темы (например «Флуд»), подключает только эту тему.
+Не считаются: команды, служебные сообщения, OC, боты, сообщения от имени канала,
+сообщения одного человека чаще раза в EXP_COOLDOWN_SECONDS.
+Если включена интеграция с ботом регистрации, подсчёт стоит ПОСЛЕ её фильтра доступа.
 """
 import html
 import logging
@@ -19,7 +24,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime
 from typing import Any
 
-from aiogram import BaseMiddleware, F, Router
+from aiogram import BaseMiddleware, Bot, F, Router
 from aiogram.enums import ContentType
 from aiogram.filters import Command, CommandObject
 from aiogram.types import Message, TelegramObject
@@ -47,36 +52,64 @@ COUNTED_TYPES = VOICE_TYPES | {
     ContentType.STORY,
 }
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+GROUP_TOP_COOLDOWN = 60  # в чате лидерборд от делегатов — не чаще раза в минуту
 
 
 def esc(text: str | None) -> str:
     return html.escape(text or "")
 
 
-# ---------------------------------------------------------------- кэш настроек
+# ---------------------------------------------------------------- состояние (с кэшем)
 
 class _State:
-    chats: set[int] | None = None
+    tracks: set[tuple[int, int]] | None = None
     active: bool | None = None
+    revealed: bool | None = None
     known_users: set[int] = set()
     last_counted: dict[int, float] = {}
+    group_top_at: dict[int, float] = {}
 
 
-async def tracked_chats() -> set[int]:
-    if _State.chats is None:
-        _State.chats = await db.exp_chat_ids()
-    return _State.chats
+async def tracks() -> set[tuple[int, int]]:
+    if _State.tracks is None:
+        _State.tracks = await db.exp_tracks()
+    return _State.tracks
 
 
 async def is_active() -> bool:
+    """Идёт ли подсчёт сообщений. По умолчанию — нет, пока админ не сделает /expstart."""
     if _State.active is None:
-        _State.active = (await db.get_setting("exp_active")) != "0"  # по умолчанию идёт
+        _State.active = (await db.get_setting("exp_active")) == "1"
     return _State.active
 
 
+async def is_revealed() -> bool:
+    """Знают ли делегаты об Экспедиции: да после первого /expstart."""
+    if _State.revealed is None:
+        _State.revealed = (await db.get_setting("exp_revealed")) == "1"
+    return _State.revealed
+
+
+async def visible_to(user_id: int) -> bool:
+    return await is_revealed() or await is_staff(user_id)
+
+
 def reset_cache() -> None:
-    _State.chats = None
+    _State.tracks = None
     _State.active = None
+    _State.revealed = None
+
+
+def thread_of(message: Message) -> int:
+    """Номер темы в чате с темами; 0 — обычный чат или «Общая» тема."""
+    return message.message_thread_id if message.is_topic_message and message.message_thread_id else 0
+
+
+def topic_title(message: Message) -> str | None:
+    reply = message.reply_to_message
+    if message.is_topic_message and reply and reply.forum_topic_created:
+        return reply.forum_topic_created.name
+    return None
 
 
 # ---------------------------------------------------------------- подсчёт сообщений
@@ -92,6 +125,11 @@ def message_points(message: Message) -> tuple[int, bool] | None:
     return EXP_MESSAGE_POINTS, False
 
 
+async def is_tracked(message: Message) -> bool:
+    t = await tracks()
+    return (message.chat.id, 0) in t or (message.chat.id, thread_of(message)) in t
+
+
 async def count_message(message: Message) -> bool:
     """Начисляет баллы за сообщение, если оно подходит. True — посчитали."""
     user = message.from_user
@@ -99,7 +137,7 @@ async def count_message(message: Message) -> bool:
         return False
     if message.sender_chat is not None or message.is_automatic_forward:
         return False  # от имени канала/группы или автопересылка из канала
-    if message.chat.id not in await tracked_chats() or not await is_active():
+    if not await is_active() or not await is_tracked(message):
         return False
     scored = message_points(message)
     if scored is None or await is_staff(user.id):
@@ -120,7 +158,7 @@ async def count_message(message: Message) -> bool:
 
 
 class ExpeditionCounter(BaseMiddleware):
-    """Считает каждое сообщение в чатах Экспедиции и пропускает его дальше —
+    """Считает каждое сообщение в отслеживаемых чатах/темах и пропускает его дальше —
     к ФотоХанту и остальным хендлерам. Ошибка подсчёта никогда не ломает бота."""
 
     async def __call__(
@@ -137,7 +175,7 @@ class ExpeditionCounter(BaseMiddleware):
         return await handler(event, data)
 
 
-# ---------------------------------------------------------------- лидерборд
+# ---------------------------------------------------------------- лидерборд и баллы
 
 async def ranking() -> list[tuple[int, int, str, int]]:
     """[(место, user_id, имя, баллы)] без OC."""
@@ -175,23 +213,42 @@ def format_board(rows, me: int | None = None) -> str:
 
 @router.message(Command("top"), F.chat.type == "private")
 async def cmd_top_private(message: Message) -> None:
-    rows = await ranking()
-    me = None if await is_staff(message.from_user.id) else message.from_user.id
-    await message.answer(format_board(rows, me))
+    user_id = message.from_user.id
+    if not await visible_to(user_id):
+        return  # Экспедиция ещё секрет — молчим, как на несуществующую команду
+    staff = await is_staff(user_id)
+    text = format_board(await ranking(), None if staff else user_id)
+    if staff and not await is_revealed():
+        text = "🔒 <i>Экспедиция скрыта — это видит только OC. Открыть: /expstart</i>\n\n" + text
+    await message.answer(text)
 
 
-@router.message(Command("top"), F.chat.type.in_(GROUPS), IsStaff())
+@router.message(Command("top"), F.chat.type.in_(GROUPS))
 async def cmd_top_group(message: Message) -> None:
-    """OC публикует свежий лидерборд прямо в чат."""
+    if not await is_revealed():
+        return  # в общем чате до открытия молчим даже для OC
+    if not await is_staff(message.from_user.id):
+        now = time.monotonic()
+        if now - _State.group_top_at.get(message.chat.id, -1e9) < GROUP_TOP_COOLDOWN:
+            return  # только что публиковали — не засоряем чат
+        _State.group_top_at[message.chat.id] = now
     await message.answer(format_board(await ranking()))
 
 
-@router.message(Command("points"), F.chat.type == "private")
+@router.message(Command("points"))
 async def cmd_points(message: Message) -> None:
     user_id = message.from_user.id
-    b = await db.points_breakdown(user_id)
+    if not await visible_to(user_id):
+        return
     total = await db.get_points(user_id)
     place = next((r[0] for r in await ranking() if r[1] == user_id), None)
+
+    if message.chat.type in GROUPS:
+        where = f", {place} место" if place else ""
+        await message.reply(f"🧭 {esc(message.from_user.first_name)}: {total} балл.{where}")
+        return
+
+    b = await db.points_breakdown(user_id)
     lines = [
         f"🧭 <b>Твоя Экспедиция: {total} балл.</b>",
         f"Место в рейтинге: <b>{place}</b>" if place else "В рейтинге тебя пока нет",
@@ -207,56 +264,103 @@ async def cmd_points(message: Message) -> None:
 
 # ---------------------------------------------------------------- управление (OC)
 
+async def _quiet_confirm(message: Message, bot: Bot, text: str) -> None:
+    """Подтверждение без шума в чате: удаляем команду и пишем админу в личку."""
+    try:
+        await message.delete()
+    except Exception:
+        pass  # у бота нет права удалять сообщения — не страшно
+    try:
+        await bot.send_message(message.from_user.id, text)
+    except Exception:
+        # админ ещё не нажал /start у бота — тогда коротко отвечаем в чате, без подробностей
+        await message.answer("✅")
+
+
+def _where(message: Message) -> str:
+    chat = esc(message.chat.title) or "чат"
+    if thread_of(message):
+        return f"тема «{esc(topic_title(message)) or thread_of(message)}» в «{chat}»"
+    return f"весь чат «{chat}»"
+
+
 @router.message(Command("track"), F.chat.type.in_(GROUPS), IsAdmin())
-async def cmd_track(message: Message) -> None:
-    added = await db.add_exp_chat(message.chat.id, message.chat.title)
+async def cmd_track(message: Message, bot: Bot) -> None:
+    title = message.chat.title
+    if thread_of(message):
+        title = f"{message.chat.title} → {topic_title(message) or thread_of(message)}"
+    added = await db.add_exp_track(message.chat.id, thread_of(message), title)
     reset_cache()
+    state = "" if await is_active() else "\n\nПодсчёт начнётся после /expstart."
     if added:
-        await message.reply("🧭 Экспедиция началась в этом чате! Каждое сообщение приносит баллы — /top в личке у бота.")
+        await _quiet_confirm(message, bot, f"🧭 Экспедиция будет считать: {_where(message)}.{state}")
     else:
-        await message.reply("Этот чат уже участвует в Экспедиции.")
+        await _quiet_confirm(message, bot, f"Уже подключено: {_where(message)}.")
 
 
 @router.message(Command("untrack"), F.chat.type.in_(GROUPS), IsAdmin())
-async def cmd_untrack(message: Message) -> None:
-    removed = await db.remove_exp_chat(message.chat.id)
+async def cmd_untrack(message: Message, bot: Bot) -> None:
+    removed = await db.remove_exp_track(message.chat.id, thread_of(message))
     reset_cache()
-    await message.reply("Сообщения в этом чате больше не считаются." if removed else "Этот чат и так не подключён.")
+    if removed:
+        await _quiet_confirm(message, bot, f"Больше не считается: {_where(message)}.")
+    else:
+        await _quiet_confirm(message, bot, f"Это и так не подключено: {_where(message)}.")
 
 
 @router.message(Command(commands=["track", "untrack"]), F.chat.type == "private", IsAdmin())
 async def cmd_track_private(message: Message) -> None:
-    await message.answer("Эту команду нужно отправить <b>в самом чате</b>, который подключаешь к Экспедиции.")
+    await message.answer(
+        "Эту команду нужно отправить <b>в самом чате</b>. Если в чате есть темы — "
+        "внутри нужной темы (например «Флуд»): тогда считаться будет только она."
+    )
+
+
+async def _status_line() -> str:
+    if await is_active():
+        return "🟢 идёт"
+    if await is_revealed():
+        return "⏸ на паузе"
+    return "🔒 скрыта (делегаты о ней не знают)"
 
 
 @router.message(Command("chats"), F.chat.type == "private", IsStaff())
 async def cmd_chats(message: Message) -> None:
-    chats = await db.list_exp_chats()
-    state = "🟢 идёт" if await is_active() else "⏸ на паузе"
-    if not chats:
-        await message.answer(f"Экспедиция: {state}\nЧатов пока нет. Подключить: /track в нужном чате.")
+    rows = await db.list_exp_tracks()
+    head = f"Экспедиция: {await _status_line()}"
+    if not rows:
+        await message.answer(f"{head}\n\nНичего не подключено. В нужном чате или теме отправь /track.")
         return
-    lines = [f"• {esc(title) or 'без названия'} (<code>{chat_id}</code>)" for chat_id, title in chats]
-    await message.answer(f"Экспедиция: {state}\n\n<b>Чаты:</b>\n" + "\n".join(lines))
-
-
-async def _set_active(message: Message, active: bool) -> None:
-    await db.set_setting("exp_active", "1" if active else "0")
-    reset_cache()
-    await message.answer(
-        "🟢 Экспедиция идёт — сообщения считаются." if active
-        else "⏸ Экспедиция на паузе — сообщения не считаются, баллы и рейтинг сохранены."
-    )
+    lines = []
+    for chat_id, thread_id, title in rows:
+        kind = "тема" if thread_id else "весь чат"
+        lines.append(f"• {esc(title) or 'без названия'} — {kind}")
+    await message.answer(f"{head}\n\n<b>Считаются:</b>\n" + "\n".join(lines))
 
 
 @router.message(Command("expstart"), F.chat.type == "private", IsAdmin())
 async def cmd_expstart(message: Message) -> None:
-    await _set_active(message, True)
+    first_time = not await is_revealed()
+    await db.set_setting("exp_active", "1")
+    await db.set_setting("exp_revealed", "1")
+    reset_cache()
+    text = "🟢 Экспедиция идёт — сообщения считаются."
+    if first_time:
+        text = (
+            "🚀 Экспедиция открыта! Сообщения считаются, делегатам теперь доступны /top и /points.\n"
+            "Бот сам ничего в чат не пишет — объявите старт своим постом "
+            "или отправьте /top в чат, чтобы показать рейтинг."
+        )
+    if not await tracks():
+        text += "\n\n⚠️ Пока не подключено ни одного чата — отправь /track в теме «Флуд»."
+    await message.answer(text)
 
 
 @router.message(Command("expstop"), F.chat.type == "private", IsAdmin())
 async def cmd_expstop(message: Message) -> None:
-    await _set_active(message, False)
+    await db.set_setting("exp_active", "0")
+    reset_cache()
+    await message.answer("⏸ Экспедиция на паузе — сообщения не считаются, баллы и рейтинг сохранены.")
 
 
 @router.message(Command("addpoints"), F.chat.type == "private", IsAdmin())
@@ -274,4 +378,3 @@ async def cmd_addpoints(message: Message, command: CommandObject) -> None:
     await db.add_points(user_id, amount, "manual", message.from_user.id)
     total = await db.get_points(user_id)
     await message.answer(f"Готово: {amount:+d} для <code>{user_id}</code>. Теперь у него {total} балл.")
-

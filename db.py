@@ -52,11 +52,13 @@ CREATE TABLE IF NOT EXISTS review_messages (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL
 );
--- Экспедиция: чаты, где считаются сообщения
-CREATE TABLE IF NOT EXISTS exp_chats (
-    chat_id INTEGER PRIMARY KEY,
+-- Экспедиция: где считаются сообщения. thread_id = 0 — весь чат, иначе конкретная тема (например «Флуд»)
+CREATE TABLE IF NOT EXISTS exp_tracks (
+    chat_id INTEGER NOT NULL,
+    thread_id INTEGER NOT NULL DEFAULT 0,
     title TEXT,
-    added_at TEXT DEFAULT CURRENT_TIMESTAMP
+    added_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (chat_id, thread_id)
 );
 -- Экспедиция: счётчики сообщений по людям и дням
 CREATE TABLE IF NOT EXISTS exp_messages (
@@ -98,6 +100,13 @@ async def init_db() -> None:
         cur = await db.execute("PRAGMA table_info(photo_submissions)")
         if "day" not in [r[1] for r in await cur.fetchall()]:
             await db.execute("ALTER TABLE photo_submissions ADD COLUMN day TEXT")
+        # Миграция: раньше чаты Экспедиции хранились без тем — переносим как «весь чат».
+        cur = await db.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='exp_chats'")
+        if await cur.fetchone():
+            await db.execute(
+                "INSERT OR IGNORE INTO exp_tracks (chat_id, thread_id, title) SELECT chat_id, 0, title FROM exp_chats"
+            )
+            await db.execute("DROP TABLE exp_chats")
         await db.commit()
 
 
@@ -378,31 +387,34 @@ async def points_breakdown(user_id: int) -> dict:
 
 # ---------- Экспедиция ----------
 
-async def add_exp_chat(chat_id: int, title: str | None) -> bool:
+async def add_exp_track(chat_id: int, thread_id: int, title: str | None) -> bool:
     async with _connect() as db:
         cur = await db.execute(
-            "INSERT OR IGNORE INTO exp_chats (chat_id, title) VALUES (?, ?)", (chat_id, title)
+            "INSERT OR IGNORE INTO exp_tracks (chat_id, thread_id, title) VALUES (?, ?, ?)",
+            (chat_id, thread_id, title),
         )
         await db.commit()
         return cur.rowcount > 0
 
 
-async def remove_exp_chat(chat_id: int) -> bool:
+async def remove_exp_track(chat_id: int, thread_id: int) -> bool:
     async with _connect() as db:
-        cur = await db.execute("DELETE FROM exp_chats WHERE chat_id=?", (chat_id,))
+        cur = await db.execute(
+            "DELETE FROM exp_tracks WHERE chat_id=? AND thread_id=?", (chat_id, thread_id)
+        )
         await db.commit()
         return cur.rowcount > 0
 
 
-async def exp_chat_ids() -> set[int]:
+async def exp_tracks() -> set[tuple[int, int]]:
     async with _connect() as db:
-        cur = await db.execute("SELECT chat_id FROM exp_chats")
-        return {r[0] for r in await cur.fetchall()}
+        cur = await db.execute("SELECT chat_id, thread_id FROM exp_tracks")
+        return {(r[0], r[1]) for r in await cur.fetchall()}
 
 
-async def list_exp_chats():
+async def list_exp_tracks():
     async with _connect() as db:
-        cur = await db.execute("SELECT chat_id, title FROM exp_chats ORDER BY added_at")
+        cur = await db.execute("SELECT chat_id, thread_id, title FROM exp_tracks ORDER BY added_at")
         return await cur.fetchall()
 
 

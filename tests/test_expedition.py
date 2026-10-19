@@ -32,7 +32,9 @@ async def exp(tmp_path, monkeypatch):
 
     importlib.reload(expedition)
     await db.init_db()
-    await db.add_exp_chat(GROUP, "test")
+    await db.add_exp_track(GROUP, 0, "test")
+    await db.set_setting("exp_active", "1")
+    await db.set_setting("exp_revealed", "1")
     return db, expedition
 
 
@@ -92,3 +94,32 @@ async def test_gate_blocks_counting_for_not_activated(exp, monkeypatch):
     await chain(make(user_id=20, text="а я нет"))
     assert await db.get_points(10) == 1
     assert await db.get_points(20) == 0
+
+
+async def test_topic_tracking(exp):
+    """В чате с темами считается только подключённая тема (например «Флуд»)."""
+    db, expedition = exp
+    forum = -100555
+    await db.add_exp_track(forum, 7, "Флуд")
+    expedition.reset_cache()
+    flood = make(chat_id=forum, text="флуд", message_thread_id=7, is_topic_message=True)
+    questions = make(chat_id=forum, text="вопрос", message_thread_id=9, is_topic_message=True)
+    general = make(chat_id=forum, text="общая")
+    assert await expedition.count_message(flood)
+    assert not await expedition.count_message(questions)
+    assert not await expedition.count_message(general)
+
+
+async def test_hidden_by_default(tmp_path, monkeypatch):
+    """Пока не было /expstart — ничего не считается и игра скрыта."""
+    monkeypatch.setenv("DB_PATH", str(tmp_path / "fresh.db"))
+    import config, db, roles
+    import handlers.expedition as expedition
+
+    for m in (config, db, roles, expedition):
+        importlib.reload(m)
+    await db.init_db()
+    await db.add_exp_track(GROUP, 0, "t")
+    assert not await expedition.is_revealed()
+    assert not await expedition.count_message(make(text="привет"))
+    assert not await expedition.visible_to(10)

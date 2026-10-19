@@ -1,20 +1,26 @@
-"""Команды, доступные всем (в личке с ботом)."""
-from aiogram import F, Router
+"""Команды для всех: работают и в личке, и в группе.
+
+В группе бот отвечает коротко и только участницкими командами — команды OC в общий чат не попадают.
+Пока Экспедиция скрыта, в /help о ней ни слова.
+"""
+import html
+
+from aiogram import Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import db
+from handlers.expedition import is_revealed
 from roles import ADMIN, MODERATOR, ROLE_NAMES, get_role
 
 router = Router()
-router.message.filter(F.chat.type == "private")
 
-HELP_USER = (
-    "/start — начать\n"
+GROUPS = {"group", "supergroup"}
+
+HELP_PHOTOHUNT = "📸 ФотоХант: присылай фото в чат с хэштегом из задания."
+HELP_EXPEDITION = (
     "/top — лидерборд Экспедиции 🧭\n"
     "/points — мои баллы и место\n"
-    "/myid — узнать свой Telegram ID\n"
-    "/help — список команд"
 )
 HELP_STAFF = (
     "\n\n<b>📸 ФотоХант (для OC):</b>\n"
@@ -24,15 +30,17 @@ HELP_STAFF = (
     "/open #хэштег — снова принимать фото\n"
     "Фото с хэштегами из чата будут приходить сюда с кнопками ✅ / ❌.\n\n"
     "<b>🧭 Экспедиция (для OC):</b>\n"
-    "/top — лидерборд (в чате — опубликовать его для всех)\n"
-    "/chats — какие чаты считаются\n"
+    "/top — лидерборд (в чате — опубликовать для всех, после открытия)\n"
+    "/points — баллы (свои)\n"
+    "/chats — статус и где считаются сообщения\n"
     "/stats — сколько людей в базе бота"
 )
 HELP_ADMIN = (
     "\n\n<b>Только для админа:</b>\n"
-    "/setchat — в чате: принимать здесь фото ФотоХанта\n"
-    "/track, /untrack — в чате: считать / не считать его сообщения\n"
-    "/expstart, /expstop — запустить / поставить Экспедицию на паузу\n"
+    "/setchat — в чате или теме: принимать здесь фото ФотоХанта\n"
+    "/track, /untrack — в чате или теме: считать / не считать сообщения\n"
+    "/expstart — открыть Экспедицию (до этого она скрыта) / снять с паузы\n"
+    "/expstop — пауза\n"
     "/addpoints ID 10 — добавить баллы (или -10 — снять)\n"
     "/addmod ID — назначить модератора\n"
     "/delmod ID — снять модератора\n"
@@ -40,24 +48,39 @@ HELP_ADMIN = (
 )
 
 
+async def user_help() -> str:
+    text = "/start — начать\n"
+    if await is_revealed():
+        text += HELP_EXPEDITION
+    text += "/myid — узнать свой Telegram ID\n/help — список команд\n\n" + HELP_PHOTOHUNT
+    return text
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     user = message.from_user
     await db.save_user(user.id, user.username, user.full_name)
+    if message.chat.type in GROUPS:
+        await message.reply(f"Привет, {html.escape(user.first_name)}! 👋 Я бот Business Cup. Команды — /help")
+        return
     role = await get_role(user.id)
-    text = (
-        f"Привет, {user.first_name}! 👋\n"
+    await message.answer(
+        f"Привет, {html.escape(user.first_name)}! 👋\n"
         "Это бот Business Cup Hackathon.\n\n"
         f"Твоя роль: <b>{ROLE_NAMES[role]}</b>\n"
         "Список команд — /help"
     )
-    await message.answer(text)
 
 
 @router.message(Command("help"))
 async def cmd_help(message: Message) -> None:
+    text = await user_help()
     role = await get_role(message.from_user.id)
-    text = HELP_USER
+    if message.chat.type in GROUPS:
+        if role in (ADMIN, MODERATOR):
+            text += "\n\n<i>Команды OC — в личке у бота.</i>"
+        await message.reply(text)
+        return
     if role in (ADMIN, MODERATOR):
         text += HELP_STAFF
     if role == ADMIN:
@@ -67,4 +90,9 @@ async def cmd_help(message: Message) -> None:
 
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
-    await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")
+    text = f"Твой Telegram ID: <code>{message.from_user.id}</code>"
+    if message.chat.type in GROUPS:
+        await message.reply(text)
+    else:
+        await message.answer(text)
+
