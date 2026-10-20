@@ -23,6 +23,7 @@ log = logging.getLogger(__name__)
 ALWAYS_ALLOWED_COMMANDS = {"/myid"}
 GROUP_NOTICE_EVERY = 6 * 3600  # в общем чате напоминаем одному человеку не чаще раза в 6 часов
 _group_noticed: dict[int, float] = {}
+_album_noticed: set[str] = set()
 
 
 def not_activated_text() -> str:
@@ -62,7 +63,12 @@ class AccessGate(BaseMiddleware):
             await event.answer(text, show_alert=True)
         elif isinstance(event, Message):
             if event.chat.type == "private":
-                await event.answer(text)
+                # альбом приходит пачкой сообщений — отвечаем только на первое
+                album = getattr(event, "media_group_id", None)
+                if album is None or album not in _album_noticed:
+                    if album:
+                        _album_noticed.add(album)
+                    await event.answer(text)
             elif event.photo or event.document:
                 # В общем чате не спамим: подсказываем человеку изредка, его фото не уходят на проверку.
                 now = time.time()

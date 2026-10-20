@@ -91,7 +91,8 @@ async def is_revealed() -> bool:
 
 
 async def visible_to(user_id: int) -> bool:
-    return await is_revealed() or await is_staff(user_id)
+    """Делегатам команды Экспедиции доступны, только пока она идёт (не скрыта и не на паузе)."""
+    return await is_active() or await is_staff(user_id)
 
 
 def reset_cache() -> None:
@@ -218,15 +219,16 @@ async def cmd_top_private(message: Message) -> None:
         return  # Экспедиция ещё секрет — молчим, как на несуществующую команду
     staff = await is_staff(user_id)
     text = format_board(await ranking(), None if staff else user_id)
-    if staff and not await is_revealed():
-        text = "🔒 <i>Экспедиция скрыта — это видит только OC. Открыть: /expstart</i>\n\n" + text
+    if staff and not await is_active():
+        text = ("🔒 <i>Экспедиция не идёт (скрыта или на паузе) — делегаты эту команду не видят. "
+                "Запустить: /phase 1 или /expstart</i>\n\n" + text)
     await message.answer(text)
 
 
 @router.message(Command("top"), F.chat.type.in_(GROUPS))
 async def cmd_top_group(message: Message) -> None:
-    if not await is_revealed():
-        return  # в общем чате до открытия молчим даже для OC
+    if not await is_active():
+        return  # пока Экспедиция не идёт (скрыта/пауза) — в общем чате молчим даже для OC
     if not await is_staff(message.from_user.id):
         now = time.monotonic()
         if now - _State.group_top_at.get(message.chat.id, -1e9) < GROUP_TOP_COOLDOWN:

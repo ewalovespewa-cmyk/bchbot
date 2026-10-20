@@ -129,6 +129,27 @@ CREATE TABLE IF NOT EXISTS exp_photo_review_msgs (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL
 );
+-- ===== Бинго (офлайн, скрытое): 9 фото одним альбомом в личку боту =====
+CREATE TABLE IF NOT EXISTS bingo_subs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending / approved / rejected
+    rejected_items TEXT,                      -- номера фото на переработку, например "3,7"
+    reviewer_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS bingo_photos (
+    sub_id INTEGER NOT NULL,
+    idx INTEGER NOT NULL,                     -- 1..9 в порядке альбома
+    file_id TEXT NOT NULL,
+    PRIMARY KEY (sub_id, idx)
+);
+CREATE TABLE IF NOT EXISTS bingo_review_msgs (
+    sub_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL
+);
 -- Общий журнал баллов (бонусы ФотоХанта, задания фаз, ручные корректировки OC и т. п.)
 CREATE TABLE IF NOT EXISTS points_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

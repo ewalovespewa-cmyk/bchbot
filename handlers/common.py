@@ -10,7 +10,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import db
-from handlers.expedition import is_revealed
+from handlers.expedition import is_active
 from roles import ADMIN, MODERATOR, ROLE_NAMES, get_role
 
 router = Router()
@@ -42,6 +42,9 @@ HELP_STAFF = (
     "/photo #тег текст — фото-задание (проверка ✅/❌ тут)\n"
     "/photo #тег 15 текст — за 15 баллов\n"
     "/photos — список · /photoclose #тег, /photoopen #тег\n\n"
+    "<b>🎲 Бинго (скрыто от делегатов):</b>\n"
+    "/bingo — статус и статистика\n"
+    "Делегаты шлют боту в личку альбом из 9 фото — он придёт сюда с кнопками ✅ / ❌.\n\n"
     "/stats — сколько людей в базе бота"
 )
 HELP_ADMIN = (
@@ -55,7 +58,7 @@ HELP_ADMIN = (
     "/expstop — пауза\n"
     "/addpoints 10 — reply на сообщение человека в группе: +10 (или -10)\n"
     "/addpoints @username 10 — то же из лички\n"
-    "/check — проверить, всё ли бот видит и что сейчас настроено\n"
+    "/check — проверить, всё ли бот видит и что сейчас настроено\n"    "/bingo on, /bingo off — включить / выключить приём бинго\n"
     "/addmod ID — назначить модератора\n"
     "/delmod ID — снять модератора\n"
     "/mods — список модераторов"
@@ -64,7 +67,7 @@ HELP_ADMIN = (
 
 async def user_help() -> str:
     text = "/start — начать\n"
-    if await is_revealed():
+    if await is_active():
         text += HELP_EXPEDITION
     text += "/myid — узнать свой Telegram ID\n/help — список команд\n\n" + HELP_PHOTOHUNT
     return text
