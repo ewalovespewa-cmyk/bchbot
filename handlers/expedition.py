@@ -227,15 +227,18 @@ async def cmd_top_private(message: Message) -> None:
 
 @router.message(Command("top"), F.chat.type.in_(GROUPS))
 async def cmd_top_group(message: Message, bot: Bot) -> None:
-    """OC публикует рейтинг для всех (команда удаляется). Делегату — кнопка в личку, без ответа в чате."""
-    from chatutil import delete_later, to_menu
+    """Лидерборд в чате: команда удаляется, а сам рейтинг остаётся висеть.
+    Пока Экспедиция не идёт — молчим (ничего не палим)."""
+    from chatutil import delete_later
 
-    if not await is_staff(message.from_user.id):
-        await to_menu(message, bot)
+    if not await is_active():
         return
     delete_later(bot, message.chat.id, [message.message_id], 0)
-    if not await is_active():
-        return  # пока Экспедиция не идёт — в общем чате ничего не публикуем
+    if not await is_staff(message.from_user.id):
+        now = time.monotonic()
+        if now - _State.group_top_at.get(message.chat.id, -1e9) < GROUP_TOP_COOLDOWN:
+            return  # рейтинг только что публиковали — он выше в чате
+        _State.group_top_at[message.chat.id] = now
     await bot.send_message(
         message.chat.id, format_board(await ranking()),
         message_thread_id=message.message_thread_id if message.is_topic_message else None,
@@ -266,11 +269,17 @@ async def points_text(user_id: int) -> str:
 @router.message(Command("points"))
 async def cmd_points(message: Message) -> None:
     user_id = message.from_user.id
-    if message.chat.type in GROUPS:
-        from chatutil import to_menu
-        await to_menu(message, message.bot)  # в группе не отвечаем — кнопка в личку
-        return
     if not await visible_to(user_id):
+        return
+    if message.chat.type in GROUPS:
+        from chatutil import GROUP_REPLY_SECONDS, ephemeral
+        if await is_staff(user_id):
+            text = "OC баллы не получает 🙂 Рейтинг участников — /top"
+        else:
+            total = await db.get_points(user_id)
+            place = next((r[0] for r in await ranking() if r[1] == user_id), None)
+            text = f"⭐ {esc(message.from_user.first_name)}: <b>{total}</b> балл." + (f", {place} место" if place else "")
+        await ephemeral(message, message.bot, text, delay=GROUP_REPLY_SECONDS)
         return
     if await is_staff(user_id):
         await message.answer(
@@ -378,13 +387,20 @@ async def cmd_expstart(message: Message) -> None:
     if not await tracks():
         text += "\n\n⚠️ Пока не подключено ни одного чата — отправь /track в теме «Флуд»."
     await message.answer(text)
+    from chatutil import sync_commands
+    await sync_commands(message.bot)
 
 
 @router.message(Command("expstop"), F.chat.type == "private", IsAdmin())
 async def cmd_expstop(message: Message) -> None:
     await db.set_setting("exp_active", "0")
     reset_cache()
-    await message.answer("⏸ Экспедиция на паузе — сообщения не считаются, баллы и рейтинг сохранены.")
+    await message.answer(
+        "⏸ Экспедиция на паузе — сообщения не считаются, баллы и рейтинг сохранены. "
+        "Делегатам команды Экспедиции сейчас недоступны."
+    )
+    from chatutil import sync_commands
+    await sync_commands(message.bot)
 
 
 ADDPOINTS_HELP = (

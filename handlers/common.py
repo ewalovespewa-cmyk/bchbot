@@ -9,7 +9,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import db
-from chatutil import to_menu
+from chatutil import GROUP_REPLY_SECONDS, ephemeral
 from handlers.expedition import is_active
 from roles import ADMIN, MODERATOR, get_role, is_staff
 
@@ -76,12 +76,21 @@ async def user_help() -> str:
 async def cmd_start_group(message: Message, bot: Bot) -> None:
     user = message.from_user
     await db.save_user(user.id, user.username, user.full_name)
-    await to_menu(message, bot)  # без ответа в чате: кнопка в личку, сама исчезнет
+    await _group_help(message, bot)
 
 
 @router.message(Command("help"), F.chat.type.in_(GROUPS))
 async def cmd_help_group(message: Message, bot: Bot) -> None:
-    await to_menu(message, bot)
+    await _group_help(message, bot)
+
+
+async def _group_help(message: Message, bot: Bot) -> None:
+    """Список команд в группе — только то, что сейчас доступно. Ничего нет — молчим.
+    Ответ исчезает через минуту вместе с командой."""
+    text = await user_help()
+    if not text:
+        return
+    await ephemeral(message, bot, "🤖 <b>Команды бота</b>\n" + text + "\n\nОстальное — в личке у бота: /start", delay=GROUP_REPLY_SECONDS)
 
 
 @router.message(Command("commands"), F.chat.type == "private")

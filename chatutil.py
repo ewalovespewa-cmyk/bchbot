@@ -16,6 +16,7 @@ log = logging.getLogger(__name__)
 
 CONFIRM_SECONDS = 5     # подтверждения команд OC в чате
 NOTICE_SECONDS = 15     # подсказки делегатам в чате, если в личку написать нельзя
+GROUP_REPLY_SECONDS = 60  # ответы на /points и /help в группе (лидерборд не удаляется)
 
 _tasks: set[asyncio.Task] = set()
 
@@ -105,3 +106,29 @@ async def menu_button(bot: Bot) -> InlineKeyboardMarkup:
 async def to_menu(message: Message, bot: Bot) -> None:
     """Делегат написал команду в группе: убираем её и даём кнопку в личку (исчезает сама)."""
     await ephemeral(message, bot, "Всё в личке у бота 👇", delay=NOTICE_SECONDS, markup=await menu_button(bot))
+
+
+async def sync_commands(bot: Bot) -> None:
+    """Подсказки команд в Telegram (то, что всплывает при вводе «/»).
+    Личка: только /start (там всё на кнопках). Группы: /top, /points, /help — только пока
+    Экспедиция идёт; до старта и на паузе в группах подсказок нет — ничего не палим."""
+    from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
+
+    from handlers.expedition import is_active
+
+    try:
+        await bot.set_my_commands([], scope=BotCommandScopeDefault())
+        await bot.set_my_commands([BotCommand(command="start", description="Меню")], scope=BotCommandScopeAllPrivateChats())
+        if await is_active():
+            await bot.set_my_commands(
+                [
+                    BotCommand(command="top", description="🏆 Лидерборд Экспедиции"),
+                    BotCommand(command="points", description="⭐ Мои баллы и место"),
+                    BotCommand(command="help", description="Что умеет бот"),
+                ],
+                scope=BotCommandScopeAllGroupChats(),
+            )
+        else:
+            await bot.delete_my_commands(scope=BotCommandScopeAllGroupChats())
+    except Exception:
+        log.warning("Не получилось обновить подсказки команд")

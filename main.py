@@ -5,9 +5,9 @@ import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import BotCommand
 
 import db
+from chatutil import sync_commands
 from config import BOT_TOKEN
 from handlers import ExpeditionCounter, diagnostics, get_routers
 from integration import setup_integration
@@ -26,11 +26,8 @@ async def main() -> None:
     dp.message.outer_middleware(ExpeditionCounter())
 
     await bot.delete_webhook(drop_pending_updates=True)
-    # В меню команд Telegram — только /start: всё остальное на кнопках, ничего лишнего не видно.
-    try:
-        await bot.set_my_commands([BotCommand(command="start", description="Меню")])
-    except Exception:
-        logging.warning("Не получилось обновить меню команд")
+    # Подсказки команд: в личке /start, в группах /top /points /help — только пока идёт Экспедиция.
+    await sync_commands(bot)
     # Если бот не видит сообщения в каком-то чате — напишет админам в личку.
     await diagnostics.startup_check(bot)
     logging.info("Бот запущен")

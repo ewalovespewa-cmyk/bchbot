@@ -206,6 +206,8 @@ async def cmd_phase(message: Message, command: CommandObject, bot: Bot) -> None:
     extra = "\nЭкспедиция открыта: делегатам доступны /top и /points." if opened_now else ""
     extra += await _blind_warning(bot)
     await message.answer(f"✅ Началась <b>{title}</b>. {published}{extra}")
+    from chatutil import sync_commands
+    await sync_commands(bot)
     if phase == 3:
         await phase3.on_phase_start(bot)
 
