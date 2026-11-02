@@ -64,13 +64,16 @@ def as_user(callback: CallbackQuery, bot: Bot) -> Message:
 
 async def scr_home(user) -> tuple[str, InlineKeyboardMarkup | None]:
     if not await is_staff(user.id):
+        rows, lines = [], [f"Привет, {esc(user.first_name)}! 👋"]
         if await is_active():
-            return (
-                f"Привет, {esc(user.first_name)}! 👋\n\n🧭 <b>Экспедиция идёт</b> — общайся в чате, "
-                "выполняй задания и поднимайся в рейтинге!",
-                kb([b("🏆 Лидерборд", "m:top"), b("⭐ Мои баллы", "m:pts")]),
-            )
-        return (f"Привет, {esc(user.first_name)}! 👋\nЭто бот Business Cup. Следи за новостями в чате 😉", None)
+            lines.append("🧭 <b>Экспедиция идёт</b> — общайся в чате, выполняй задания и поднимайся в рейтинге!")
+            rows.append([b("🏆 Лидерборд", "m:top"), b("⭐ Мои баллы", "m:pts")])
+        if await bingo.available_for(user.id):
+            lines.append("🎲 <b>Бинго открыто</b> — сдавай задания по одному, в любом порядке.")
+            rows.append([b("🎲 Бинго", "bgo:grid")])
+        if not rows:
+            return (f"Привет, {esc(user.first_name)}! 👋\nЭто бот Business Cup. Следи за новостями в чате 😉", None)
+        return "\n\n".join(lines), kb(*rows)
 
     admin = user.id in ADMIN_IDS
     phase = await phases.current_phase()
@@ -183,6 +186,7 @@ async def scr_bg(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     rows = []
     if admin:
         rows.append([b("⚪️ Выключить приём", "m:bg:off")] if await bingo.is_open() else [b("🟢 Включить приём", "m:bg:on")])
+    rows.append([b("🧪 Открыть карточку как делегат", "bgo:grid")])
     rows.append(back())
     return await bingo.status_text(), kb(*rows)
 

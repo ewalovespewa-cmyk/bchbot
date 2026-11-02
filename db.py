@@ -150,6 +150,28 @@ CREATE TABLE IF NOT EXISTS bingo_review_msgs (
     chat_id INTEGER NOT NULL,
     message_id INTEGER NOT NULL
 );
+-- Бинго v2: каждое из 9 заданий сдаётся отдельно (1–3 текст, 4–9 фото)
+CREATE TABLE IF NOT EXISTS bingo_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL,
+    cell INTEGER NOT NULL,                    -- 1..9
+    kind TEXT NOT NULL,                       -- 'text' / 'photo'
+    content TEXT NOT NULL,                    -- текст ответа или file_id фото
+    status TEXT NOT NULL DEFAULT 'pending',   -- pending / approved / rejected
+    reviewer_id INTEGER,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    reviewed_at TEXT
+);
+CREATE TABLE IF NOT EXISTS bingo_item_msgs (
+    item_id INTEGER NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER NOT NULL,
+    is_photo INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS bingo_done (
+    user_id INTEGER PRIMARY KEY,
+    done_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
 -- Общий журнал баллов (бонусы ФотоХанта, задания фаз, ручные корректировки OC и т. п.)
 CREATE TABLE IF NOT EXISTS points_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
