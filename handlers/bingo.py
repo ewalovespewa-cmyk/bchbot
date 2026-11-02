@@ -61,6 +61,21 @@ async def is_open() -> bool:
     return (await db.get_setting("bingo_open")) == "1"
 
 
+async def task_text(cell: int) -> str | None:
+    """Текст задания, который задали OC (меню → Бинго → Тексты заданий). None — не задан."""
+    return await db.get_setting(f"bingo_task_{cell}")
+
+
+async def set_task_text(cell: int, text: str) -> None:
+    await db.set_setting(f"bingo_task_{cell}", text.strip() or None)
+
+
+async def task_line(cell: int) -> str:
+    """«📝 Задание 6: Сфоткайся с ментором» — напоминание, что именно нужно сделать."""
+    t = await task_text(cell)
+    return f"📝 <b>Задание {cell}:</b> {esc(t)}" if t else f"📝 <b>Задание {cell}</b>"
+
+
 async def available_for(user_id: int) -> bool:
     """Видит ли человек бинго. OC — всегда (чтобы тестировать), делегат — когда приём включён
     (и, с ботом регистрации, только если отметился на входе)."""
@@ -117,11 +132,17 @@ async def grid(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
             for n in range(r * 3 + 1, r * 3 + 4)
         ])
     rows.append([b("⬅️ Меню", "m:home")])
+    tasks = []
+    for n in range(1, CELLS + 1):
+        t = await task_text(n)
+        if t:
+            tasks.append(f"{ICON[card.get(n)]} <b>{n}.</b> {esc(t)}")
     text = (
         "🎲 <b>Бинго</b>\n"
         "Задания <b>1–3</b> — текст ✍️, <b>4–9</b> — фото 📸.\n"
         "Нажми на номер задания, чтобы сдать его. Порядок любой.\n\n"
-        "⬜ не сдано · ⏳ на проверке · ✅ засчитано · ❌ переделать\n\n"
+        + ("\n".join(tasks) + "\n\n" if tasks else "")
+        + "⬜ не сдано · ⏳ на проверке · ✅ засчитано · ❌ переделать\n\n"
         f"Засчитано: <b>{done} из {CELLS}</b>"
     )
     if await is_staff(user_id):
@@ -163,7 +184,7 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
         what = "<b>текст</b> ответа одним сообщением ✍️" if kind_of(cell) == "text" else "<b>фото</b> 📸"
         again = "\n\n<i>В прошлый раз не засчитали — попробуй ещё раз.</i>" if status == "rejected" else ""
         await callback.message.edit_text(
-            f"🎲 <b>Задание {cell}</b>\n\nПришли {what}.{again}",
+            f"{await task_line(cell)}\n\nПришли {what}.{again}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[b("✖️ Отмена", "bgo:grid")]]),
         )
         await callback.answer()
@@ -197,7 +218,7 @@ async def on_answer(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.answer(f"Задание {cell} уже на проверке или засчитано 👌", reply_markup=to_card_kb())
         return
     await message.answer(
-        f"📨 Задание {cell} отправлено на проверку! Ответ придёт сюда. Можно делать следующие.",
+        f"📨 Отправлено на проверку! Ответ придёт сюда. Можно делать следующие.\n\n{await task_line(cell)}",
         reply_markup=to_card_kb(),
     )
     await send_to_review(bot, item_id)
@@ -225,9 +246,11 @@ def _who(item) -> str:
     return who
 
 
-def _header(item) -> str:
+def _header(item, task: str | None = None) -> str:
     what = "текст" if item["kind"] == "text" else "фото"
     head = f"🎲 <b>Бинго · задание {item['cell']}</b> ({what})\nОт: {_who(item)}"
+    if task:
+        head += f"\n📝 {esc(task)}"
     if item["kind"] == "text":
         head += f"\n\n«{esc(item['content'])}»"
     return head
@@ -242,7 +265,7 @@ def _review_kb(item_id: int) -> InlineKeyboardMarkup:
 
 async def send_to_review(bot: Bot, item_id: int) -> None:
     item = await db_bingo.get(item_id)
-    text, kb = _header(item), _review_kb(item_id)
+    text, kb = _header(item, await task_text(item["cell"])), _review_kb(item_id)
     if await is_staff(item["user_id"]):
         text = "🧪 <i>тест OC</i>\n" + text
     for target in await review_targets():
@@ -271,7 +294,7 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         return
     item = await db_bingo.get(item_id)
     who = esc(callback.from_user.full_name)
-    text = _header(item) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
+    text = _header(item, await task_text(item["cell"])) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
     for chat_id, message_id, is_photo in await db_bingo.msgs(item_id):
         try:
             if is_photo:
@@ -288,7 +311,7 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
             await db.add_points(user_id, BINGO_POINTS, "bingo", item_id)
         card = await db_bingo.card(user_id)
         done = sum(1 for s in card.values() if s == "approved")
-        await _notify(bot, user_id, f"✅ Бинго: задание {cell} засчитано! ({done} из {CELLS})")
+        await _notify(bot, user_id, f"✅ Бинго: засчитано! ({done} из {CELLS})\n{await task_line(cell)}")
         if done == CELLS and await db_bingo.mark_done(user_id):
             await _notify(bot, user_id, "🎉 <b>Бинго собрано полностью!</b> Все 9 заданий засчитаны — ты молодец!")
             for target in await review_targets():
@@ -300,13 +323,20 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         what = "новый текст" if kind_of(cell) == "text" else "новое фото"
         await _notify(
             bot, user_id,
-            f"❌ Бинго: задание {cell} не засчитано. Переделай и пришли {what}, когда будет удобно — "
-            "можно пока делать другие задания.",
+            f"❌ Бинго: не засчитано.\n{await task_line(cell)}\n\n"
+            f"Переделай и пришли {what}, когда будет удобно — можно пока делать другие задания.",
+            redo=cell,
         )
 
 
-async def _notify(bot: Bot, user_id: int, text: str) -> None:
+async def _notify(bot: Bot, user_id: int, text: str, redo: int | None = None) -> None:
+    markup = to_card_kb()
+    if redo:
+        markup = InlineKeyboardMarkup(inline_keyboard=[
+            [b(f"🔁 Переделать задание {redo}", f"bgo:c:{redo}")],
+            [b("🎲 К карточке бинго", "bgo:grid")],
+        ])
     try:
-        await bot.send_message(user_id, text, reply_markup=to_card_kb())
+        await bot.send_message(user_id, text, reply_markup=markup)
     except Exception:
         log.warning("Не смог написать делегату %s про бинго", user_id)

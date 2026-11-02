@@ -64,7 +64,6 @@ async def configured_chats() -> dict[int, list[str]]:
             uses.setdefault(int(chat_id), []).append(what)
 
     add(await db.get_setting("photo_chat_id"), "ФотоХант (/setchat)")
-    add(await db.get_setting("phase_chat_id"), "задания фаз (/setphasechat)")
     add(await db.get_setting("review_chat_id"), "чат OC для проверки (/setreviewchat)")
     for chat_id, thread_id, title in await db.list_exp_tracks():
         add(chat_id, f"Экспедиция: {title or 'чат'}" + (" (тема)" if thread_id else ""))
@@ -107,7 +106,6 @@ async def cmd_check(message: Message, bot: Bot) -> None:
 
 async def check_text(bot: Bot) -> str:
     from handlers.expedition import is_active, is_revealed
-    from handlers.phases import PHASES, current_phase
 
     me = await bot.me()
     lines = ["🩺 <b>Проверка бота</b>", ""]
@@ -119,21 +117,18 @@ async def check_text(bot: Bot) -> str:
     lines += ["", "<b>Чаты:</b>"]
     chats = await configured_chats()
     if not chats:
-        lines.append("ничего не настроено — /setchat, /track, /setphasechat в нужных чатах")
+        lines.append("ничего не настроено — /setchat, /track, /setreviewchat в нужных чатах")
     any_blind = False
     for chat_id, uses in chats.items():
         ok, title, note = await chat_access(bot, chat_id)
         any_blind |= not ok
         lines.append(f"• «{esc(title)}» — {', '.join(uses)}\n   {note}")
 
-    phase = await current_phase()
     state = "🟢 идёт" if await is_active() else ("⏸ пауза" if await is_revealed() else "🔒 скрыта")
     lines += ["", f"<b>Экспедиция:</b> {state}",
-              f"Фаза: {PHASES[phase][0] if phase in PHASES else 'между фазами'}"]
+              ]
     word = await db_phases.active_word_task()
-    lines.append(f"Активное слово: «{esc(word['word'])}»" if word else "Активного слова нет")
-    photos = [r for r in await db_phases.list_photo_tasks() if r["active"]]
-    lines.append(f"Активных фото-заданий: {len(photos)}")
+    lines.append(f"Текстовое задание: «{esc(word['word'])}»" if word else "Текстового задания сейчас нет")
 
     mods = await db.list_moderators()
     lines += ["", f"<b>OC:</b> админов {len(ADMIN_IDS)}, модераторов {len(mods)}",

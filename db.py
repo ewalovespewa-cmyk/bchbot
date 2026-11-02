@@ -185,12 +185,14 @@ CREATE TABLE IF NOT EXISTS points_log (
 
 
 def _connect():
-    return aiosqlite.connect(DB_PATH)
+    return aiosqlite.connect(DB_PATH, timeout=15)
 
 
 async def init_db() -> None:
     os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     async with _connect() as db:
+        # WAL: запись сообщений и чтение рейтинга идут параллельно, без ожидания блокировок
+        await db.execute("PRAGMA journal_mode=WAL")
         await db.executescript(SCHEMA)
         # Миграция: день отправки фото (для бонуса Экспедиции). В старых базах колонки нет.
         cur = await db.execute("PRAGMA table_info(photo_submissions)")

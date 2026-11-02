@@ -3,7 +3,7 @@ import os
 
 os.environ.setdefault("BOT_TOKEN", "1:TEST")
 
-from handlers.phases import is_sentence, word_matches  # noqa: E402
+from handlers.words import is_sentence, word_matches  # noqa: E402
 
 
 def test_word_forms():

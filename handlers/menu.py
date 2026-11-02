@@ -7,8 +7,7 @@ OC видит панель по секциям: ФотоХант · Экспед
 Действия, где нужен текст (новое задание, слово, баллы, модератор), бот просит прислать одним
 сообщением. Всё, что делают кнопки, делают и старые команды — они продолжают работать.
 
-Настройки чатов делаются командой прямо в нужном чате: /setchat, /track, /setphasechat,
-/setreviewchat — бот удаляет команду и подтверждает в личке.
+Настройки чатов делаются командой прямо в нужном чате: /setchat, /track, /setreviewchat — бот удаляет команду и подтверждает в личке.
 """
 import html
 
@@ -21,7 +20,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 import db
 import db_phases
 from handlers import admin as admin_cmds
-from handlers import bingo, diagnostics, expedition, phases, photohunt
+from handlers import bingo, diagnostics, expedition, photohunt, words
 from handlers.expedition import _quiet_confirm, format_board, is_active, is_revealed, points_text, ranking, visible_to
 from roles import IsAdmin, is_staff
 from config import ADMIN_IDS
@@ -76,19 +75,17 @@ async def scr_home(user) -> tuple[str, InlineKeyboardMarkup | None]:
         return "\n\n".join(lines), kb(*rows)
 
     admin = user.id in ADMIN_IDS
-    phase = await phases.current_phase()
     exp = "🟢 идёт" if await is_active() else ("⏸ пауза" if await is_revealed() else "🔒 скрыта")
     review = "общий чат OC ✅" if await db.get_setting("review_chat_id") else "в личку каждому"
     text = (
         f"🛠 <b>Панель OC</b> ({'админ' if admin else 'модератор'})\n\n"
         f"🧭 Экспедиция: {exp}\n"
-        f"✍️ Фаза: {phases.PHASES[phase][0] if phase in phases.PHASES else 'между фазами'}\n"
         f"🎲 Бинго: {'🟢 приём включён' if await bingo.is_open() else '⚪️ приём выключен'}\n"
         f"📨 Проверка фото: {review}"
     )
     rows = [
         [b("📸 ФотоХант", "m:ph"), b("🧭 Экспедиция", "m:exp")],
-        [b("✍️ Фазы", "m:phs"), b("🎲 Бинго", "m:bg")],
+        [b("🎲 Бинго", "m:bg")],
     ]
     if admin:
         rows.append([b("⚙️ Настройки", "m:set"), b("🩺 Проверка", "m:check")])
@@ -115,14 +112,18 @@ async def scr_exp(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     active, revealed = await is_active(), await is_revealed()
     state = "🟢 идёт" if active else ("⏸ на паузе" if revealed else "🔒 скрыта — делегаты о ней не знают")
     tracks = await db.list_exp_tracks()
+    word = await db_phases.active_word_task()
     text = (
         f"🧭 <b>Экспедиция</b>: {state}\n"
-        f"Считается сообщений в: {len(tracks)} чат(ах/темах)\n\n"
+        f"Считается сообщений в: {len(tracks)} чат(ах/темах)\n"
+        f"✍️ Текстовое задание сейчас: {('«' + esc(word['word']) + '»') if word else 'нет'}\n\n"
         "<i>Подключить тему «Флуд»: отправь /track прямо в ней.</i>"
     )
     rows = []
     if admin:
         rows.append([b("⏸ Пауза", "m:exp:off")] if active else [b("▶️ Запустить", "m:exp:on")])
+    rows.append([b("✍️ Новое слово", "m:in:word"), b("⚪️ Закрыть слово", "m:wordoff")])
+    rows.append([b("📜 История слов", "m:words")])
     rows.append([b("🏆 Лидерборд", "m:top"), b("📍 Где считается", "m:chats")])
     if admin:
         rows.append([b("🛠 Начислить / снять баллы", "m:in:addpoints")])
@@ -137,81 +138,75 @@ async def scr_chats() -> tuple[str, InlineKeyboardMarkup]:
     return "\n".join(lines), kb(back("exp"))
 
 
-async def scr_phs(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
-    phase = await phases.current_phase()
-    word = await db_phases.active_word_task()
-    photos = [r for r in await db_phases.list_photo_tasks() if r["active"]]
-    text = (
-        f"✍️ <b>Фазы Экспедиции</b>\n"
-        f"Сейчас: <b>{phases.PHASES[phase][0] if phase in phases.PHASES else 'между фазами'}</b>\n"
-        f"Активное слово: {('«' + esc(word['word']) + '»') if word else 'нет'}\n"
-        f"Активных фото-заданий: {len(photos)}"
-    )
-    rows = []
-    if admin:
-        rows.append([b(f"▶️ Фаза {n}", f"m:phq:{n}") for n in (1, 2, 3)])
-        if phase in phases.PHASES:
-            rows.append([b("⏹ Завершить фазу", "m:phendq")])
-    rows += [
-        [b("✍️ Новое слово", "m:in:word"), b("⚪️ Закрыть слово", "m:wordoff")],
-        [b("📜 История слов", "m:words")],
-        [b("🖼 Новое фото-задание", "m:in:photo"), b("📋 Фото-задания", "m:photos")],
-        back(),
-    ]
-    return text, kb(*rows)
-
-
 async def scr_words() -> tuple[str, InlineKeyboardMarkup]:
     rows = await db_phases.list_word_tasks()
     lines = ["📜 <b>Слова</b> (последние)", ""]
     lines += [f"{'🟢' if r['active'] else '⚪️'} «{esc(r['word'])}» · +{r['points']} · выполнили: {r['done']}" for r in rows] or ["Слов пока не было."]
-    return "\n".join(lines), kb(back("phs"))
-
-
-async def scr_photos() -> tuple[str, InlineKeyboardMarkup]:
-    tasks = await db_phases.list_photo_tasks()
-    lines = ["📋 <b>Фото-задания Экспедиции</b>", ""]
-    rows = []
-    if not tasks:
-        lines.append("Пока нет.")
-    for t in tasks[:10]:
-        lines.append(f"{'🟢' if t['active'] else '⚪️'} #{esc(t['hashtag'])} · +{t['points']} — {esc(t['text'])} · ✅ {t['approved']} · ⏳ {t['pending']}")
-        rows.append([b(f"{'⚪️ Закрыть' if t['active'] else '🟢 Открыть'} #{t['hashtag']}",
-                       f"m:ept:{t['id']}:{0 if t['active'] else 1}")])
-    rows.append(back("phs"))
-    return "\n".join(lines), kb(*rows)
+    return "\n".join(lines), kb(back("exp"))
 
 
 async def scr_bg(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     rows = []
     if admin:
         rows.append([b("⚪️ Выключить приём", "m:bg:off")] if await bingo.is_open() else [b("🟢 Включить приём", "m:bg:on")])
+    rows.append([b("✏️ Тексты заданий", "m:bgt")])
     rows.append([b("🧪 Открыть карточку как делегат", "bgo:grid")])
     rows.append(back())
     return await bingo.status_text(), kb(*rows)
+
+
+async def scr_bgt() -> tuple[str, InlineKeyboardMarkup]:
+    lines = ["✏️ <b>Тексты заданий бинго</b>", "",
+             "Делегат увидит текст задания в карточке и когда будет его сдавать — чтобы не путался.",
+             "Нажми номер, чтобы задать или поменять текст.", ""]
+    for n in range(1, bingo.CELLS + 1):
+        t = await bingo.task_text(n)
+        kind = "✍️" if bingo.kind_of(n) == "text" else "📸"
+        lines.append(f"{kind} <b>{n}.</b> {esc(t) if t else '<i>— не задан —</i>'}")
+    rows = [[b(str(n), f"m:in:bgt:{n}") for n in range(r * 3 + 1, r * 3 + 4)] for r in range(3)]
+    rows.append(back("bg"))
+    return "\n".join(lines), kb(*rows)
 
 
 async def scr_set() -> tuple[str, InlineKeyboardMarkup]:
     def mark(v):
         return "✅" if v else "—"
     photo = await db.get_setting("photo_chat_id")
-    phase_chat = await db.get_setting("phase_chat_id")
     review = await db.get_setting("review_chat_id")
     tracks = await db.list_exp_tracks()
     text = (
         "⚙️ <b>Настройки</b>\n\n"
         "Чаты настраиваются командой <b>прямо в нужном чате</b> (бот удалит её и ответит в личку):\n"
         f"{mark(review)} <code>/setreviewchat</code> — в чате OC: сюда приходят все фото на проверку\n"
-        f"{mark(photo)} <code>/setchat</code> — в чате делегатов: ФотоХант\n"
-        f"{mark(phase_chat or photo)} <code>/setphasechat</code> — куда публиковать задания фаз (по умолчанию — чат ФотоХанта)\n"
+        f"{mark(photo)} <code>/setchat</code> — в чате делегатов: ФотоХант и текстовые задания\n"
         f"{mark(tracks)} <code>/track</code> — в теме «Флуд»: там считаются сообщения\n\n"
         "Бот должен быть <b>админом</b> в этих чатах — проверить: «🩺 Проверка»."
     )
-    rows = [[b("👥 Модераторы", "m:mods")]]
-    if review:
-        rows.append([b("↩️ Проверка снова в личку (сбросить чат OC)", "m:revoff")])
+    rows = [[b("👥 Модераторы", "m:mods")], [b("🔄 Сбросить чаты", "m:rst")]]
     rows.append(back())
     return text, kb(*rows)
+
+
+async def scr_rst() -> tuple[str, InlineKeyboardMarkup]:
+    """Сбросить привязку чатов: что где трекается. Сообщения и баллы не удаляются."""
+    photo = await db.get_setting("photo_chat_id")
+    review = await db.get_setting("review_chat_id")
+    tracks = await db.list_exp_tracks()
+    lines = ["🔄 <b>Сбросить чаты</b>", "",
+             "Убирает привязку чата — бот перестанет там работать. Баллы и задания сохраняются.",
+             "Привязать заново — та же команда в нужном чате.", ""]
+    rows = []
+    lines.append(f"📸 Чат делегатов (ФотоХант, задания): {'задан' if photo else '—'}")
+    if photo:
+        rows.append([b("❌ Сбросить чат делегатов", "m:rs:photo")])
+    lines.append(f"📨 Чат OC для проверки: {'задан' if review else '—'}")
+    if review:
+        rows.append([b("❌ Сбросить чат OC (проверка — в личку)", "m:rs:review")])
+    lines.append(f"🧭 Экспедиция считает в: {len(tracks)}")
+    for chat_id, thread_id, title in tracks:
+        rows.append([b(f"❌ Не считать: {(title or 'чат')[:32]}", f"m:rs:trk:{chat_id}:{thread_id}")])
+    rows.append(back("set"))
+    return "\n".join(lines), kb(*rows)
 
 
 async def scr_mods() -> tuple[str, InlineKeyboardMarkup]:
@@ -239,18 +234,18 @@ async def render(screen: str, user, bot: Bot) -> tuple[str, InlineKeyboardMarkup
         return await scr_exp(admin)
     if screen == "chats":
         return await scr_chats()
-    if screen == "phs":
-        return await scr_phs(admin)
     if screen == "words":
         return await scr_words()
-    if screen == "photos":
-        return await scr_photos()
+    if screen == "bgt":
+        return await scr_bgt()
     if screen == "bg":
         return await scr_bg(admin)
     if screen == "set" and admin:
         return await scr_set()
     if screen == "mods" and admin:
         return await scr_mods()
+    if screen == "rst" and admin:
+        return await scr_rst()
     if screen == "check" and admin:
         return await diagnostics.check_text(bot), kb(back())
     return await scr_home(user)
@@ -283,8 +278,7 @@ async def cmd_start(message: Message, state: FSMContext, bot: Bot) -> None:
 
 INPUTS = {
     "task": ("📸 Пришли хэштег и текст задания ФотоХанта одним сообщением:\n<code>#кружка Сфоткайся с кружкой</code>", "ph"),
-    "word": ("✍️ Пришли слово. Можно с баллами и своим текстом:\n<code>кофе</code>\n<code>кофе 10</code>\n<code>кофе 10 Напишите, как вы пьёте кофе</code>", "phs"),
-    "photo": ("🖼 Пришли хэштег и текст фото-задания (можно с баллами):\n<code>#кружка Сфоткайся с кружкой</code>\n<code>#кружка 15 Сфоткайся с кружкой</code>", "phs"),
+    "word": ("✍️ Пришли слово. Можно с баллами и своим текстом:\n<code>кофе</code>\n<code>кофе 10</code>\n<code>кофе 10 Напишите, как вы пьёте кофе</code>", "exp"),
     "addpoints": ("🛠 Пришли username (или ID) и число баллов, минус — снять:\n<code>@username 10</code>\n<code>@username -5</code>\n\n"
                   "<i>Ещё проще: в группе ответь на сообщение человека командой</i> <code>/addpoints 10</code>", "exp"),
     "addmod": ("👥 Пришли @username или ID будущего модератора.\n<i>Он должен хотя бы раз нажать /start у бота.</i>", "mods"),
@@ -309,9 +303,7 @@ async def on_input(message: Message, state: FSMContext, bot: Bot) -> None:
     if action == "task":
         await photohunt.cmd_task(message, co("task", text), bot)
     elif action == "word":
-        await phases.cmd_word(message, co("word", text), bot)
-    elif action == "photo":
-        await phases.cmd_photo(message, co("photo", text), bot)
+        await words.cmd_word(message, co("word", text), bot)
     elif action == "addpoints":
         await expedition.cmd_addpoints(message, co("addpoints", text))
     elif action == "addmod":
@@ -324,8 +316,10 @@ async def on_input(message: Message, state: FSMContext, bot: Bot) -> None:
                 return
             who = str(row[0])
         await admin_cmds.cmd_addmod(message, co("addmod", who))
-    elif action.startswith("phase:"):
-        await phases.cmd_phase(message, co("phase", f"{action.split(':')[1]} {text}"), bot)
+    elif action.startswith("bgt:"):
+        n = int(action.split(":")[1])
+        await bingo.set_task_text(n, text)
+        await message.answer(f"✅ Текст задания {n} сохранён — делегаты увидят его в карточке и при сдаче.")
     await show(message, back_to, bot)
 
 
@@ -371,10 +365,14 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         if action in ADMIN_INPUTS and not admin:
             await callback.answer("Это может только админ.", show_alert=True)
             return
-        if action == "phase" and admin:
-            n = parts[3]
-            prompt = f"✏️ Пришли текст объявления для <b>{phases.PHASES[int(n)][0]}</b> — он уйдёт в чат делегатов."
-            await ask(callback, state, f"phase:{n}", prompt, "phs")
+        if action == "bgt":
+            n = int(parts[3])
+            current = await bingo.task_text(n)
+            prompt = (
+                f"✏️ Пришли текст <b>задания {n}</b> бинго — делегаты увидят его в карточке и когда будут сдавать."
+                + (f"\n\nСейчас: <i>{esc(current)}</i>" if current else "")
+            )
+            await ask(callback, state, f"bgt:{n}", prompt, "bgt")
             return
         prompt, back_to = INPUTS[action]
         await ask(callback, state, action, prompt, back_to)
@@ -389,19 +387,14 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await callback.answer(f"#{tag}: {'открыто' if parts[3] == '1' else 'закрыто'}" if tag else "Задание не найдено")
         await show(callback, "ph", bot)
         return
-    if key == "ept":  # открыть/закрыть фото-задание фазы
-        await db_phases.set_photo_active_by_id(int(parts[2]), parts[3] == "1")
-        await callback.answer("Открыто" if parts[3] == "1" else "Закрыто")
-        await show(callback, "photos", bot)
-        return
     if key == "wordoff":
         closed = await db_phases.close_word_tasks()
         await callback.answer("Слово закрыто" if closed else "Активного слова нет")
-        await show(callback, "phs", bot)
+        await show(callback, "exp", bot)
         return
 
     # --- только админ ---
-    admin_keys = {"exp", "bg", "phq", "phgo", "phendq", "phend", "revoff", "delmod"}
+    admin_keys = {"exp", "bg", "revoff", "delmod", "rs"}
     if key in admin_keys and len(parts) > 2 and not admin:
         await callback.answer("Это может только админ.", show_alert=True)
         return
@@ -419,32 +412,20 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await callback.answer("Приём бинго включён" if parts[2] == "on" else "Приём бинго выключен")
         await show(callback, "bg", bot)
         return
-    if key == "phq":
-        n = int(parts[2])
-        title, default_text = phases.PHASES[n]
-        await callback.message.edit_text(
-            f"Начать <b>{title}</b>?\n\nВ чат делегатов уйдёт объявление:\n<i>{esc(default_text)}</i>",
-            reply_markup=kb([b("✅ Начать", f"m:phgo:{n}"), b("✏️ Свой текст", f"m:in:phase:{n}")], back("phs")),
-        )
-        await callback.answer()
-        return
-    if key == "phgo":
-        await callback.answer()
-        await phases.cmd_phase(as_user(callback, bot), co("phase", parts[2]), bot)
-        await show(callback, "phs", bot, new=True)
-        return
-    if key == "phendq":
-        await callback.message.edit_text(
-            "Завершить текущую фазу?\n\nВ чат уйдёт объявление о завершении, активные задания фазы закроются. "
-            "Баллы и рейтинг сохранятся.",
-            reply_markup=kb([b("✅ Завершить", "m:phend:1")], back("phs")),
-        )
-        await callback.answer()
-        return
-    if key == "phend":
-        await callback.answer()
-        await phases.cmd_phase(as_user(callback, bot), co("phase", "end"), bot)
-        await show(callback, "phs", bot, new=True)
+    if key == "rs":  # сброс привязки чатов
+        what = parts[2]
+        if what == "photo":
+            await db.set_setting("photo_chat_id", None)
+            await db.set_setting("photo_thread_id", None)
+            await callback.answer("Чат делегатов сброшен. Привязать заново: /setchat в нужном чате", show_alert=True)
+        elif what == "review":
+            await db.set_setting("review_chat_id", None)
+            await callback.answer("Чат OC сброшен — фото на проверку теперь приходят в личку", show_alert=True)
+        elif what == "trk":
+            await db.remove_exp_track(int(parts[3]), int(parts[4]))
+            expedition.reset_cache()
+            await callback.answer("Там больше не считается. Вернуть: /track в нужном чате", show_alert=True)
+        await show(callback, "rst", bot)
         return
     if key == "revoff":
         await db.set_setting("review_chat_id", None)

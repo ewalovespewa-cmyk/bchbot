@@ -21,7 +21,6 @@ import html
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from datetime import datetime
 from typing import Any
 
 from aiogram import BaseMiddleware, Bot, F, Router
@@ -33,7 +32,6 @@ import db
 from config import (
     EXP_COOLDOWN_SECONDS,
     EXP_MESSAGE_POINTS,
-    EXP_PRIZE_PLACES,
     EXP_TOP_SIZE,
     EXP_VOICE_POINTS,
     LOCAL_TZ,
@@ -52,7 +50,6 @@ COUNTED_TYPES = VOICE_TYPES | {
     ContentType.STORY,
 }
 MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
-GROUP_TOP_COOLDOWN = 60  # в чате лидерборд от делегатов — не чаще раза в минуту
 
 
 def esc(text: str | None) -> str:
@@ -67,7 +64,6 @@ class _State:
     revealed: bool | None = None
     known_users: set[int] = set()
     last_counted: dict[int, float] = {}
-    group_top_at: dict[int, float] = {}
 
 
 async def tracks() -> set[tuple[int, int]]:
@@ -189,17 +185,14 @@ async def ranking() -> list[tuple[int, int, str, int]]:
 
 
 def format_board(rows, me: int | None = None) -> str:
-    stamp = datetime.now(LOCAL_TZ).strftime("%d.%m %H:%M")
+    """Чистый лидерборд: заголовок и топ-15. В личке (me задан) — ещё строка про своё место."""
     if not rows:
         return "🧭 <b>Экспедиция</b>\n\nПока никто не набрал баллов — пишите в чат, чтобы открыть рейтинг!"
     lines = ["🧭 <b>Экспедиция — лидерборд</b>", ""]
     for place, user_id, name, total in rows[:EXP_TOP_SIZE]:
-        if place == EXP_PRIZE_PLACES + 1:
-            lines += ["", "🎗 <i>Утешительные призы:</i>"]
         mark = MEDALS.get(place, f"{place}.")
-        gift = " 🎁" if place <= EXP_PRIZE_PLACES else ""
         name = f"<b>{esc(name)}</b>" if user_id == me else esc(name)
-        lines.append(f"{mark} {name} — {total}{gift}")
+        lines.append(f"{mark} {name} — {total}")
     if me is not None:
         mine = next((r for r in rows if r[1] == me), None)
         lines.append("")
@@ -208,7 +201,6 @@ def format_board(rows, me: int | None = None) -> str:
         elif mine[0] > EXP_TOP_SIZE:
             gap = rows[EXP_TOP_SIZE - 1][3] - mine[3] + 1
             lines.append(f"Ты на <b>{mine[0]}</b> месте ({mine[3]} балл.). До топ-{EXP_TOP_SIZE}: {gap} балл.")
-    lines += ["", f"<i>🎁 — призы для топ-{EXP_PRIZE_PLACES}, места {EXP_PRIZE_PLACES + 1}–{EXP_TOP_SIZE} — утешительные. Обновлено {stamp}</i>"]
     return "\n".join(lines)
 
 
@@ -221,28 +213,38 @@ async def cmd_top_private(message: Message) -> None:
     text = format_board(await ranking(), None if staff else user_id)
     if staff and not await is_active():
         text = ("🔒 <i>Экспедиция не идёт (скрыта или на паузе) — делегаты эту команду не видят. "
-                "Запустить: /phase 1 или /expstart</i>\n\n" + text)
+                "Запустить: меню → 🧭 Экспедиция → ▶️ Запустить</i>\n\n" + text)
     await message.answer(text)
+
+
+_board_locks: dict = {}
 
 
 @router.message(Command("top"), F.chat.type.in_(GROUPS))
 async def cmd_top_group(message: Message, bot: Bot) -> None:
-    """Лидерборд в чате: команда удаляется, а сам рейтинг остаётся висеть.
-    Пока Экспедиция не идёт — молчим (ничего не палим)."""
+    """Лидерборд в чате: команда удаляется сразу, прошлый лидерборд бота удаляется,
+    свежий остаётся висеть — в чате всегда один актуальный. Пока Экспедиция не идёт — молчим."""
+    import asyncio
+
     from chatutil import delete_later
 
     if not await is_active():
         return
     delete_later(bot, message.chat.id, [message.message_id], 0)
-    if not await is_staff(message.from_user.id):
-        now = time.monotonic()
-        if now - _State.group_top_at.get(message.chat.id, -1e9) < GROUP_TOP_COOLDOWN:
-            return  # рейтинг только что публиковали — он выше в чате
-        _State.group_top_at[message.chat.id] = now
-    await bot.send_message(
-        message.chat.id, format_board(await ranking()),
-        message_thread_id=message.message_thread_id if message.is_topic_message else None,
-    )
+    lock = _board_locks.setdefault(message.chat.id, asyncio.Lock())
+    async with lock:  # несколько /top подряд — по очереди, без дублей
+        key = f"board_msg_{message.chat.id}"
+        old = await db.get_setting(key)
+        if old:
+            try:
+                await bot.delete_message(message.chat.id, int(old))
+            except Exception:
+                pass  # уже удалён или нет прав
+        sent = await bot.send_message(
+            message.chat.id, format_board(await ranking()),
+            message_thread_id=message.message_thread_id if message.is_topic_message else None,
+        )
+        await db.set_setting(key, str(sent.message_id))
 
 
 async def points_text(user_id: int) -> str:
@@ -272,14 +274,20 @@ async def cmd_points(message: Message) -> None:
     if not await visible_to(user_id):
         return
     if message.chat.type in GROUPS:
-        from chatutil import GROUP_REPLY_SECONDS, ephemeral
+        from chatutil import GROUP_REPLY_SECONDS, delete_later
+        bot = message.bot
+        delete_later(bot, message.chat.id, [message.message_id], 0)  # команду убираем сразу
         if await is_staff(user_id):
             text = "OC баллы не получает 🙂 Рейтинг участников — /top"
         else:
             total = await db.get_points(user_id)
             place = next((r[0] for r in await ranking() if r[1] == user_id), None)
             text = f"⭐ {esc(message.from_user.first_name)}: <b>{total}</b> балл." + (f", {place} место" if place else "")
-        await ephemeral(message, message.bot, text, delay=GROUP_REPLY_SECONDS)
+        sent = await bot.send_message(
+            message.chat.id, text,
+            message_thread_id=message.message_thread_id if message.is_topic_message else None,
+        )
+        delete_later(bot, message.chat.id, [sent.message_id], GROUP_REPLY_SECONDS)
         return
     if await is_staff(user_id):
         await message.answer(
