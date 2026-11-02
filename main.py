@@ -25,7 +25,9 @@ async def main() -> None:
     # Экспедиция: считает сообщения в чатах. Стоит после фильтра доступа — баллы только допущенным.
     dp.message.outer_middleware(ExpeditionCounter())
 
-    await bot.delete_webhook(drop_pending_updates=True)
+    # Не выбрасываем сообщения, пришедшие пока бот перезапускался (обновление на Railway ~1–2 мин):
+    # после старта бот их обработает — баллы и фото не теряются.
+    await bot.delete_webhook(drop_pending_updates=False)
     # Подсказки команд: в личке /start, в группах /top /points /help — только пока идёт Экспедиция.
     await sync_commands(bot)
     # Если бот не видит сообщения в каком-то чате — напишет админам в личку.
