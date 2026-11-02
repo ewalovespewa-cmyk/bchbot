@@ -4,11 +4,12 @@
 """
 import html
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import db
+from chatutil import to_menu
 from handlers.expedition import is_active
 from roles import ADMIN, MODERATOR, get_role, is_staff
 
@@ -72,18 +73,15 @@ async def user_help() -> str:
 
 
 @router.message(CommandStart(), F.chat.type.in_(GROUPS))
-async def cmd_start_group(message: Message) -> None:
+async def cmd_start_group(message: Message, bot: Bot) -> None:
     user = message.from_user
     await db.save_user(user.id, user.username, user.full_name)
-    await message.reply(f"Привет, {html.escape(user.first_name)}! 👋 Напиши мне в личку — там всё на кнопках.")
+    await to_menu(message, bot)  # без ответа в чате: кнопка в личку, сама исчезнет
 
 
 @router.message(Command("help"), F.chat.type.in_(GROUPS))
-async def cmd_help_group(message: Message) -> None:
-    text = await user_help()
-    if text:
-        await message.reply(text)
-    # иначе молчим: ничего не палим
+async def cmd_help_group(message: Message, bot: Bot) -> None:
+    await to_menu(message, bot)
 
 
 @router.message(Command("commands"), F.chat.type == "private")
@@ -102,4 +100,10 @@ async def cmd_commands(message: Message) -> None:
 async def cmd_myid(message: Message) -> None:
     if not await is_staff(message.from_user.id):
         return  # делегатам эта команда не нужна
-    await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")
+    text = f"Твой Telegram ID: <code>{message.from_user.id}</code>"
+    if message.chat.type in GROUPS:
+        from chatutil import delete_later, tell_user
+        delete_later(message.bot, message.chat.id, [message.message_id], 0)
+        await tell_user(message.bot, message.from_user.id, text, message)
+        return
+    await message.answer(text)

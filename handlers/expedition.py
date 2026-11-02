@@ -226,15 +226,20 @@ async def cmd_top_private(message: Message) -> None:
 
 
 @router.message(Command("top"), F.chat.type.in_(GROUPS))
-async def cmd_top_group(message: Message) -> None:
-    if not await is_active():
-        return  # пока Экспедиция не идёт (скрыта/пауза) — в общем чате молчим даже для OC
+async def cmd_top_group(message: Message, bot: Bot) -> None:
+    """OC публикует рейтинг для всех (команда удаляется). Делегату — кнопка в личку, без ответа в чате."""
+    from chatutil import delete_later, to_menu
+
     if not await is_staff(message.from_user.id):
-        now = time.monotonic()
-        if now - _State.group_top_at.get(message.chat.id, -1e9) < GROUP_TOP_COOLDOWN:
-            return  # только что публиковали — не засоряем чат
-        _State.group_top_at[message.chat.id] = now
-    await message.answer(format_board(await ranking()))
+        await to_menu(message, bot)
+        return
+    delete_later(bot, message.chat.id, [message.message_id], 0)
+    if not await is_active():
+        return  # пока Экспедиция не идёт — в общем чате ничего не публикуем
+    await bot.send_message(
+        message.chat.id, format_board(await ranking()),
+        message_thread_id=message.message_thread_id if message.is_topic_message else None,
+    )
 
 
 async def points_text(user_id: int) -> str:
@@ -261,6 +266,10 @@ async def points_text(user_id: int) -> str:
 @router.message(Command("points"))
 async def cmd_points(message: Message) -> None:
     user_id = message.from_user.id
+    if message.chat.type in GROUPS:
+        from chatutil import to_menu
+        await to_menu(message, message.bot)  # в группе не отвечаем — кнопка в личку
+        return
     if not await visible_to(user_id):
         return
     if await is_staff(user_id):
@@ -269,13 +278,6 @@ async def cmd_points(message: Message) -> None:
             "Проверяй с обычного аккаунта. Рейтинг участников — /top, состояние бота — /check."
         )
         return
-    total = await db.get_points(user_id)
-    place = next((r[0] for r in await ranking() if r[1] == user_id), None)
-
-    if message.chat.type in GROUPS:
-        where = f", {place} место" if place else ""
-        await message.reply(f"🧭 {esc(message.from_user.first_name)}: {total} балл.{where}")
-        return
 
     await message.answer(await points_text(user_id))
 
@@ -283,16 +285,16 @@ async def cmd_points(message: Message) -> None:
 # ---------------------------------------------------------------- управление (OC)
 
 async def _quiet_confirm(message: Message, bot: Bot, text: str) -> None:
-    """Подтверждение без шума в чате: удаляем команду и пишем админу в личку."""
-    try:
-        await message.delete()
-    except Exception:
-        pass  # у бота нет права удалять сообщения — не страшно
+    """Подтверждение команды OC в группе. В чате на 5 секунд — нейтральное «✅ Готово» (ничего
+    не палим), потом оно исчезает вместе с командой. Подробности — админу в личку.
+    Если в личку написать нельзя — полный текст в чате, тоже на 5 секунд."""
+    from chatutil import ephemeral
+
     try:
         await bot.send_message(message.from_user.id, text)
+        await ephemeral(message, bot, "✅ Готово — подробности в личке")
     except Exception:
-        # админ ещё не нажал /start у бота — тогда коротко отвечаем в чате, без подробностей
-        await message.answer("✅")
+        await ephemeral(message, bot, text)
 
 
 def _where(message: Message) -> str:

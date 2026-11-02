@@ -74,7 +74,8 @@ class AccessGate(BaseMiddleware):
                 now = time.time()
                 if now - _group_noticed.get(user.id, 0) > GROUP_NOTICE_EVERY:
                     _group_noticed[user.id] = now
-                    await event.reply(text)
+                    from chatutil import tell_user
+                    await tell_user(event.bot, user.id, text, event)
         return None
 
 

@@ -27,6 +27,7 @@ from aiogram.types import (
 )
 
 import db
+from chatutil import ephemeral, react, tell_user, tell_user_about
 from config import EXP_PHOTOHUNT_DAY_POINTS, LOCAL_TZ
 from handlers.expedition import is_revealed
 from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
@@ -50,12 +51,13 @@ async def get_photo_chat() -> tuple[int | None, int | None]:
 
 
 @router.message(Command("setchat"), F.chat.type.in_({"group", "supergroup"}), IsAdmin())
-async def cmd_setchat(message: Message) -> None:
+async def cmd_setchat(message: Message, bot: Bot) -> None:
     thread_id = message.message_thread_id if message.is_topic_message else None
     await db.set_setting("photo_chat_id", str(message.chat.id))
     await db.set_setting("photo_thread_id", str(thread_id) if thread_id else None)
     where = "в этой теме" if thread_id else "в этом чате"
-    await message.reply(f"✅ ФотоХант теперь работает {where}. Задания буду публиковать сюда.")
+    from handlers.expedition import _quiet_confirm
+    await _quiet_confirm(message, bot, f"✅ ФотоХант теперь работает {where} («{esc(message.chat.title)}»). Задания буду публиковать сюда.")
 
 
 @router.message(Command("setchat"), F.chat.type == "private", IsAdmin())
@@ -242,10 +244,10 @@ async def on_group_photo(message: Message, bot: Bot) -> None:
     await db.save_user(user.id, user.username, user.full_name)
 
     if await db.user_has_approved(task["id"], user.id):
-        await message.reply(f"Задание #{esc(task['hashtag'])} у тебя уже засчитано 👌")
+        await tell_user(bot, user.id, f"📸 Задание #{esc(task['hashtag'])} у тебя уже засчитано 👌", message)
         return
     if await db.user_has_pending(task["id"], user.id):
-        await message.reply("Твоё прошлое фото по этому заданию ещё на проверке ⏳")
+        await tell_user(bot, user.id, f"📸 Твоё прошлое фото по #{esc(task['hashtag'])} ещё на проверке ⏳", message)
         return
 
     file_id, is_document = image
@@ -319,15 +321,8 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
                 reply += "\n(бонус Экспедиции за этот день уже получен)"
     else:
         reply = f"❌ Фото по заданию #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
-    try:
-        await bot.send_message(
-            sub["chat_id"],
-            reply,
-            reply_parameters=ReplyParameters(
-                message_id=sub["message_id"], allow_sending_without_reply=True
-            ),
-        )
-    except Exception:
-        log.warning("Не смог ответить делегату в чате (submission %s)", sub_id)
+    if approved:
+        await react(bot, sub["chat_id"], sub["message_id"])
+    await tell_user_about(bot, sub["user_id"], sub["chat_id"], sub["message_id"], reply)
 
     await callback.answer("Засчитано ✅" if approved else "Отклонено ❌")

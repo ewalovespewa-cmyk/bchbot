@@ -40,6 +40,7 @@ from aiogram.types import (
 )
 
 import db
+from chatutil import react, tell_user, tell_user_about
 import db_phases
 from config import PHASE_PHOTO_POINTS, PHASE_WORD_MIN_WORDS, PHASE_WORD_POINTS
 from handlers import phase3
@@ -328,31 +329,33 @@ async def on_word_answer(message: Message, bot: Bot, word_task, oc_test: bool = 
     text = message.text or message.caption or ""
     if oc_test:
         ok = word_task["active"] and is_sentence(text) and word_matches(text, word_task["word"])
-        await message.reply(
+        await tell_user(
+            bot, user.id,
             "🧪 Проверка OC: " + ("✅ у делегата такой ответ засчитался бы." if ok
                                   else "❌ такой ответ не засчитался бы.") +
-            " OC баллы не получает."
+            " OC баллы не получает.",
+            message,
         )
         return
     if not word_task["active"]:
-        await message.reply("Это слово уже закрыто — ищи новое задание 😉")
+        await tell_user(bot, user.id, f"✍️ Слово «{esc(word_task['word'])}» уже закрыто — ищи новое задание 😉", message)
         return
     if await db_phases.word_done(word_task["id"], user.id):
-        await message.reply("Это слово у тебя уже засчитано 👌")
+        await tell_user(bot, user.id, f"✍️ Слово «{esc(word_task['word'])}» у тебя уже засчитано 👌", message)
         return
     if not is_sentence(text) or not word_matches(text, word_task["word"]):
-        await message.reply(
-            f"Не засчитано: нужно предложение (от {PHASE_WORD_MIN_WORDS} слов) "
-            f"со словом «{esc(word_task['word'])}» ✍️"
+        await tell_user(
+            bot, user.id,
+            f"✍️ Не засчитано: нужно предложение (от {PHASE_WORD_MIN_WORDS} слов) "
+            f"со словом «{esc(word_task['word'])}». Ответь (reply) на пост с заданием ещё раз.",
+            message,
         )
         return
     await db.save_user(user.id, user.username, user.full_name)
     if not await db_phases.complete_word(word_task["id"], user.id, message.chat.id, message.message_id, word_task["points"]):
         return
-    try:
-        await bot.set_message_reaction(message.chat.id, message.message_id, reaction=[ReactionTypeEmoji(emoji="👍")])
-    except Exception:
-        await message.reply(f"✅ +{word_task['points']} 🧭")
+    if not await react(bot, message.chat.id, message.message_id):
+        await tell_user(bot, user.id, f"✅ Слово засчитано: +{word_task['points']} 🧭", message)
 
 
 # ---------------------------------------------------------------- фаза 2: фото
@@ -507,18 +510,20 @@ def _review_caption(sub, decision: str | None = None) -> str:
 async def on_photo_answer(message: Message, bot: Bot, photo_task, oc_test: bool = False) -> None:
     user = message.from_user
     if oc_test:
-        await message.reply(
+        await tell_user(
+            bot, user.id,
             f"🧪 Проверка OC: фото распознано по #{esc(photo_task['hashtag'])} — "
-            "у делегата оно ушло бы вам на проверку. OC баллы не получает."
+            "у делегата оно ушло бы вам на проверку. OC баллы не получает.",
+            message,
         )
         return
     await db.save_user(user.id, user.username, user.full_name)
     status = await db_phases.photo_status(photo_task["id"], user.id)
     if status == "approved":
-        await message.reply("Это задание у тебя уже засчитано 👌")
+        await tell_user(bot, user.id, f"🖼 Фото-задание #{esc(photo_task['hashtag'])} у тебя уже засчитано 👌", message)
         return
     if status == "pending":
-        await message.reply("Твоё фото по этому заданию ещё на проверке ⏳")
+        await tell_user(bot, user.id, f"🖼 Твоё фото по #{esc(photo_task['hashtag'])} ещё на проверке ⏳", message)
         return
     file_id, is_document = _image(message)
     sub_id = await db_phases.create_photo_sub(photo_task["id"], user.id, message.chat.id, message.message_id, file_id, is_document)
@@ -534,13 +539,16 @@ async def on_photo_answer(message: Message, bot: Bot, photo_task, oc_test: bool 
 
 
 @router.message(F.chat.type.in_(GROUPS), PhotoWithoutTag())
-async def on_photo_without_tag(message: Message, photo_task) -> None:
+async def on_photo_without_tag(message: Message, bot: Bot, photo_task) -> None:
+    uid = message.from_user.id
     if not photo_task["active"]:
-        await message.reply("Это фото-задание уже закрыто 😉")
+        await tell_user(bot, uid, f"🖼 Фото-задание #{esc(photo_task['hashtag'])} уже закрыто 😉", message)
         return
-    await message.reply(
-        f"Добавь в подпись хэштег <b>#{esc(photo_task['hashtag'])}</b> и пришли фото ещё раз — "
-        "без хэштега не засчитаю 📸"
+    await tell_user(
+        bot, uid,
+        f"🖼 Добавь в подпись хэштег <b>#{esc(photo_task['hashtag'])}</b> и пришли фото в чат ещё раз — "
+        "без хэштега не засчитаю 📸",
+        message,
     )
 
 
@@ -568,14 +576,10 @@ async def on_photo_review(callback: CallbackQuery, bot: Bot) -> None:
         except Exception:
             log.warning("Не смог обновить проверку у %s", chat_id)
     reply = (
-        f"✅ Фото засчитано! +{sub['points']} в Экспедицию 🧭" if approved
-        else "❌ Фото не засчитано. Можно прислать другое."
+        f"✅ Фото по #{esc(sub['hashtag'])} засчитано! +{sub['points']} в Экспедицию 🧭" if approved
+        else f"❌ Фото по #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
     )
-    try:
-        await bot.send_message(
-            sub["chat_id"], reply,
-            reply_parameters=ReplyParameters(message_id=sub["message_id"], allow_sending_without_reply=True),
-        )
-    except Exception:
-        log.warning("Не смог ответить делегату (фото Экспедиции %s)", sub_id)
+    if approved:
+        await react(bot, sub["chat_id"], sub["message_id"])
+    await tell_user_about(bot, sub["user_id"], sub["chat_id"], sub["message_id"], reply)
     await callback.answer("Засчитано ✅" if approved else "Отклонено ❌")
