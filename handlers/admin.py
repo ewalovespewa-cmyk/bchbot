@@ -26,8 +26,8 @@ async def cmd_addmod(message: Message, command: CommandObject) -> None:
     user_id = _parse_id(command)
     if user_id is None:
         await message.answer(
-            "Напиши так: <code>/addmod 123456789</code>\n"
-            "Свой ID человек может узнать, отправив боту /myid."
+            "Удобнее через меню: /start → ⚙️ Настройки → 👥 Модераторы → ➕ (можно по @username).\n"
+            "Или командой: <code>/addmod 123456789</code>"
         )
         return
     added = await db.add_moderator(user_id, message.from_user.id)
@@ -37,7 +37,7 @@ async def cmd_addmod(message: Message, command: CommandObject) -> None:
     await message.answer(f"✅ <code>{user_id}</code> теперь модератор.")
     try:
         await message.bot.send_message(
-            user_id, "Тебя назначили модератором бота. Команды — /help"
+            user_id, "Тебя назначили модератором бота 🛠 Панель — /start"
         )
     except Exception:
         await message.answer(

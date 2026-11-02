@@ -29,7 +29,7 @@ from aiogram.types import (
 import db
 from config import EXP_PHOTOHUNT_DAY_POINTS, LOCAL_TZ
 from handlers.expedition import is_revealed
-from roles import IsAdmin, IsStaff, is_staff, staff_ids
+from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -258,7 +258,7 @@ async def on_group_photo(message: Message, bot: Bot) -> None:
     keyboard = review_keyboard(sub_id)
 
     delivered = 0
-    for staff_id in await staff_ids():
+    for staff_id in await review_targets():
         try:
             if is_document:
                 sent = await bot.send_document(staff_id, file_id, caption=caption, reply_markup=keyboard)

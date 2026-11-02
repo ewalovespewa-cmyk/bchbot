@@ -44,7 +44,7 @@ import db_phases
 from config import PHASE_PHOTO_POINTS, PHASE_WORD_MIN_WORDS, PHASE_WORD_POINTS
 from handlers import phase3
 from handlers.expedition import _quiet_confirm, is_active, is_revealed, reset_cache, thread_of, tracks
-from roles import IsAdmin, IsStaff, is_staff, staff_ids
+from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -524,7 +524,7 @@ async def on_photo_answer(message: Message, bot: Bot, photo_task, oc_test: bool 
     sub_id = await db_phases.create_photo_sub(photo_task["id"], user.id, message.chat.id, message.message_id, file_id, is_document)
     sub = await db_phases.get_photo_sub(sub_id)
     caption, kb = _review_caption(sub), _review_kb(sub_id)
-    for staff_id in await staff_ids():
+    for staff_id in await review_targets():
         try:
             send = bot.send_document if is_document else bot.send_photo
             sent = await send(staff_id, file_id, caption=caption, reply_markup=kb)

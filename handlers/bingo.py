@@ -33,7 +33,7 @@ import db_bingo
 from integration import access as bc_access
 from integration import config as bc_config
 from integration.gate import NEED_CHECKIN_TEXT
-from roles import IsAdmin, IsStaff, is_staff, staff_ids
+from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -70,14 +70,18 @@ async def cmd_bingo(message: Message, command: CommandObject) -> None:
             "🎲 Приём бинго <b>выключен</b>: фото в личке бот молча игнорирует."
         )
         return
+    await message.answer(await status_text())
+
+
+async def status_text() -> str:
     s = await db_bingo.stats()
-    await message.answer(
+    return (
         f"🎲 <b>Бинго</b> (скрыто от делегатов)\n"
         f"Приём: {'🟢 включён' if await is_open() else '⚪️ выключен'}\n\n"
         f"Ждут проверки: {s['pending']}\n"
         f"Засчитано: {s['approved']} (людей: {s['people_done']})\n"
         f"На переработке было: {s['rejected']}\n\n"
-        "Включить/выключить приём: <code>/bingo on</code> · <code>/bingo off</code>"
+        "Делегаты присылают боту в личку альбом из 9 фото — он придёт на проверку OC."
     )
 
 
@@ -199,7 +203,7 @@ async def send_to_staff(bot: Bot, sub_id: int) -> None:
     sub = await db_bingo.get(sub_id)
     files = await db_bingo.photos(sub_id)
     media = [InputMediaPhoto(media=f, caption=f"№{i}") for i, f in enumerate(files, 1)]
-    for staff_id in await staff_ids():
+    for staff_id in await review_targets():
         try:
             await bot.send_media_group(staff_id, media=media)
             sent = await bot.send_message(staff_id, _header(sub), reply_markup=_main_kb(sub_id))

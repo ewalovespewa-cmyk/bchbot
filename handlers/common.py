@@ -1,23 +1,21 @@
-"""Команды для всех: работают и в личке, и в группе.
+"""Команды в группе и служебные. В личке /start, /help, /menu открывают меню на кнопках (handlers/menu.py).
 
-В группе бот отвечает коротко и только участницкими командами — команды OC в общий чат не попадают.
-Пока Экспедиция скрыта, в /help о ней ни слова.
+В группе бот отвечает коротко и только тем, что сейчас доступно делегатам — ничего не палит.
 """
 import html
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import db
 from handlers.expedition import is_active
-from roles import ADMIN, MODERATOR, ROLE_NAMES, get_role
+from roles import ADMIN, MODERATOR, get_role, is_staff
 
 router = Router()
 
 GROUPS = {"group", "supergroup"}
 
-HELP_PHOTOHUNT = "📸 ФотоХант: присылай фото в чат с хэштегом из задания."
 HELP_EXPEDITION = (
     "/top — лидерборд Экспедиции 🧭\n"
     "/points — мои баллы и место\n"
@@ -58,7 +56,8 @@ HELP_ADMIN = (
     "/expstop — пауза\n"
     "/addpoints 10 — reply на сообщение человека в группе: +10 (или -10)\n"
     "/addpoints @username 10 — то же из лички\n"
-    "/check — проверить, всё ли бот видит и что сейчас настроено\n"    "/bingo on, /bingo off — включить / выключить приём бинго\n"
+    "/check — проверить, всё ли бот видит и что сейчас настроено\n"
+    "/bingo on, /bingo off — включить / выключить приём бинго\n"
     "/addmod ID — назначить модератора\n"
     "/delmod ID — снять модератора\n"
     "/mods — список модераторов"
@@ -66,50 +65,41 @@ HELP_ADMIN = (
 
 
 async def user_help() -> str:
-    text = "/start — начать\n"
+    """Что можно делегату прямо сейчас (для /help в группе). Пусто — нечего показывать."""
     if await is_active():
-        text += HELP_EXPEDITION
-    text += "/myid — узнать свой Telegram ID\n/help — список команд\n\n" + HELP_PHOTOHUNT
-    return text
+        return HELP_EXPEDITION.strip()
+    return ""
 
 
-@router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+@router.message(CommandStart(), F.chat.type.in_(GROUPS))
+async def cmd_start_group(message: Message) -> None:
     user = message.from_user
     await db.save_user(user.id, user.username, user.full_name)
-    if message.chat.type in GROUPS:
-        await message.reply(f"Привет, {html.escape(user.first_name)}! 👋 Я бот Business Cup. Команды — /help")
-        return
-    role = await get_role(user.id)
-    await message.answer(
-        f"Привет, {html.escape(user.first_name)}! 👋\n"
-        "Это бот Business Cup Hackathon.\n\n"
-        f"Твоя роль: <b>{ROLE_NAMES[role]}</b>\n"
-        "Список команд — /help"
-    )
+    await message.reply(f"Привет, {html.escape(user.first_name)}! 👋 Напиши мне в личку — там всё на кнопках.")
 
 
-@router.message(Command("help"))
-async def cmd_help(message: Message) -> None:
+@router.message(Command("help"), F.chat.type.in_(GROUPS))
+async def cmd_help_group(message: Message) -> None:
     text = await user_help()
-    role = await get_role(message.from_user.id)
-    if message.chat.type in GROUPS:
-        if role in (ADMIN, MODERATOR):
-            text += "\n\n<i>Команды OC — в личке у бота.</i>"
+    if text:
         await message.reply(text)
+    # иначе молчим: ничего не палим
+
+
+@router.message(Command("commands"), F.chat.type == "private")
+async def cmd_commands(message: Message) -> None:
+    """Полный список команд для OC (на случай, если удобнее командами, чем кнопками)."""
+    role = await get_role(message.from_user.id)
+    if role not in (ADMIN, MODERATOR):
         return
-    if role in (ADMIN, MODERATOR):
-        text += HELP_STAFF
+    text = "<b>Команды</b> (то же самое есть на кнопках в /start)" + HELP_STAFF
     if role == ADMIN:
-        text += HELP_ADMIN
+        text += HELP_ADMIN + "\n/setreviewchat — в чате OC: сюда приходят все фото на проверку"
     await message.answer(text)
 
 
 @router.message(Command("myid"))
 async def cmd_myid(message: Message) -> None:
-    text = f"Твой Telegram ID: <code>{message.from_user.id}</code>"
-    if message.chat.type in GROUPS:
-        await message.reply(text)
-    else:
-        await message.answer(text)
-
+    if not await is_staff(message.from_user.id):
+        return  # делегатам эта команда не нужна
+    await message.answer(f"Твой Telegram ID: <code>{message.from_user.id}</code>")

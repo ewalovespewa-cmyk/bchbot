@@ -232,3 +232,10 @@ async def get_photo_review_msgs(sub_id: int):
             "SELECT chat_id, message_id FROM exp_photo_review_msgs WHERE sub_id=?", (sub_id,)
         )
         return await cur.fetchall()
+
+
+async def set_photo_active_by_id(task_id: int, active: bool) -> bool:
+    async with _connect() as db:
+        cur = await db.execute("UPDATE exp_photo_tasks SET active=? WHERE id=?", (int(active), task_id))
+        await db.commit()
+        return cur.rowcount > 0

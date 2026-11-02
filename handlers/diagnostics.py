@@ -65,6 +65,7 @@ async def configured_chats() -> dict[int, list[str]]:
 
     add(await db.get_setting("photo_chat_id"), "ФотоХант (/setchat)")
     add(await db.get_setting("phase_chat_id"), "задания фаз (/setphasechat)")
+    add(await db.get_setting("review_chat_id"), "чат OC для проверки (/setreviewchat)")
     for chat_id, thread_id, title in await db.list_exp_tracks():
         add(chat_id, f"Экспедиция: {title or 'чат'}" + (" (тема)" if thread_id else ""))
     return uses
@@ -101,6 +102,10 @@ async def startup_check(bot: Bot) -> None:
 
 @router.message(Command("check"), F.chat.type == "private", IsAdmin())
 async def cmd_check(message: Message, bot: Bot) -> None:
+    await message.answer(await check_text(bot))
+
+
+async def check_text(bot: Bot) -> str:
     from handlers.expedition import is_active, is_revealed
     from handlers.phases import PHASES, current_phase
 
@@ -135,4 +140,4 @@ async def cmd_check(message: Message, bot: Bot) -> None:
               "<i>OC баллы не получают — тестируйте с обычных аккаунтов.</i>"]
     if any_blind:
         lines += ["", FIX_TEXT]
-    await message.answer("\n".join(lines))
+    return "\n".join(lines)

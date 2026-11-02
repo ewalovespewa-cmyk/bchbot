@@ -237,6 +237,27 @@ async def cmd_top_group(message: Message) -> None:
     await message.answer(format_board(await ranking()))
 
 
+async def points_text(user_id: int) -> str:
+    total = await db.get_points(user_id)
+    place = next((r[0] for r in await ranking() if r[1] == user_id), None)
+    b = await db.points_breakdown(user_id)
+    lines = [
+        f"🧭 <b>Твоя Экспедиция: {total} балл.</b>",
+        f"Место в рейтинге: <b>{place}</b>" if place else "В рейтинге тебя пока нет",
+        "",
+        f"💬 Сообщения: {b['messages']}",
+        f"🎙 Голосовые и кружки: {b['voices']}",
+        f"📸 Дней в ФотоХанте: {b['photohunt_days']} (+{b['photohunt_points']})",
+    ]
+    if b["word_count"]:
+        lines.append(f"✍️ Задания со словами: {b['word_count']} (+{b['word_points']})")
+    if b["photo_count"]:
+        lines.append(f"🖼 Фото-задания: {b['photo_count']} (+{b['photo_points']})")
+    if b["adjust_points"]:
+        lines.append(f"🛠 Корректировка OC: {b['adjust_points']:+d}")
+    return "\n".join(lines)
+
+
 @router.message(Command("points"))
 async def cmd_points(message: Message) -> None:
     user_id = message.from_user.id
@@ -256,22 +277,7 @@ async def cmd_points(message: Message) -> None:
         await message.reply(f"🧭 {esc(message.from_user.first_name)}: {total} балл.{where}")
         return
 
-    b = await db.points_breakdown(user_id)
-    lines = [
-        f"🧭 <b>Твоя Экспедиция: {total} балл.</b>",
-        f"Место в рейтинге: <b>{place}</b>" if place else "В рейтинге тебя пока нет",
-        "",
-        f"💬 Сообщения: {b['messages']}",
-        f"🎙 Голосовые и кружки: {b['voices']}",
-        f"📸 Дней в ФотоХанте: {b['photohunt_days']} (+{b['photohunt_points']})",
-    ]
-    if b["word_count"]:
-        lines.append(f"✍️ Задания со словами: {b['word_count']} (+{b['word_points']})")
-    if b["photo_count"]:
-        lines.append(f"🖼 Фото-задания: {b['photo_count']} (+{b['photo_points']})")
-    if b["adjust_points"]:
-        lines.append(f"🛠 Корректировка OC: {b['adjust_points']:+d}")
-    await message.answer("\n".join(lines))
+    await message.answer(await points_text(user_id))
 
 
 # ---------------------------------------------------------------- управление (OC)

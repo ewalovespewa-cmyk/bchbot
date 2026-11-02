@@ -532,3 +532,15 @@ async def award_photohunt_day(user_id: int, day: str, submission_id: int, points
         )
         await db.commit()
         return True
+
+
+async def set_task_active_by_id(task_id: int, active: bool):
+    """Для кнопок меню: открыть/закрыть задание ФотоХанта по id. Возвращает хэштег или None."""
+    async with _connect() as db:
+        cur = await db.execute("SELECT hashtag FROM photo_tasks WHERE id=?", (task_id,))
+        row = await cur.fetchone()
+        if row is None:
+            return None
+        await db.execute("UPDATE photo_tasks SET active=? WHERE id=?", (int(active), task_id))
+        await db.commit()
+        return row[0]

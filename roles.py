@@ -30,6 +30,15 @@ async def staff_ids() -> list[int]:
     return ids
 
 
+async def review_targets() -> list[int]:
+    """Куда отправлять фото на проверку: общий чат OC (/setreviewchat), а если он не задан —
+    каждому админу и модератору в личку."""
+    chat_id = await db.get_setting("review_chat_id")
+    if chat_id:
+        return [int(chat_id)]
+    return await staff_ids()
+
+
 class IsAdmin(BaseFilter):
     async def __call__(self, event: Message | CallbackQuery) -> bool:
         return event.from_user is not None and event.from_user.id in ADMIN_IDS
