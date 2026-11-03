@@ -115,6 +115,9 @@ def _reply_to_bot(message: Message, bot: Bot):
     reply = message.reply_to_message
     if reply and reply.from_user and reply.from_user.id == bot.id:
         return reply
+    # бот-админ с «Remain Anonymous»: его посты идут от имени группы
+    if reply and reply.sender_chat and reply.sender_chat.id == message.chat.id:
+        return reply
     return None
 
 
