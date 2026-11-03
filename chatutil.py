@@ -118,11 +118,14 @@ async def sync_commands(bot: Bot) -> None:
 
     try:
         await bot.set_my_commands([], scope=BotCommandScopeDefault())
-        await bot.set_my_commands([BotCommand(command="start", description="Меню")], scope=BotCommandScopeAllPrivateChats())
+        private = [BotCommand(command="start", description="Меню")]
+        if await is_active():
+            private.append(BotCommand(command="points", description="⭐ Мои баллы"))
+        await bot.set_my_commands(private, scope=BotCommandScopeAllPrivateChats())
         if await is_active():
             await bot.set_my_commands(
                 [
-                    BotCommand(command="top", description="🏆 Лидерборд Экспедиции"),
+                    BotCommand(command="top", description="🏆 Лидерборд"),
                     BotCommand(command="help", description="Что умеет бот"),
                 ],
                 scope=BotCommandScopeAllGroupChats(),

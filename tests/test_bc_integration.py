@@ -128,6 +128,6 @@ async def test_bingo_filter_requires_checkin_today(env, monkeypatch):
     await access.save(5, True, [], "event")
     msg = _message(5)
     assert await gate.IsCheckedIn()(msg) is False
-    assert "Бинго откроется" in msg.answer.await_args.args[0]
+    assert "Бинго пока недоступно" in msg.answer.await_args.args[0]
     await access.save(5, True, [access.today()], "event")
     assert await gate.IsCheckedIn()(_message(5)) is True

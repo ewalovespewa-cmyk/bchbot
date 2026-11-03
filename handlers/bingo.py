@@ -145,19 +145,19 @@ async def grid(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
             b(f"{ICON[card.get(n)]} {n}", f"bgo:c:{n}")
             for n in range(r * 3 + 1, r * 3 + 4)
         ])
-    rows.append([b("⬅️ Меню", "m:home")])
+    rows.append([b("⬅️ Главное меню", "m:home")])
     tasks = []
     for n in range(1, CELLS + 1):
         t = await task_text(n)
         if t:
             tasks.append(f"{ICON[card.get(n)]} <b>{n}.</b> {esc(t)}")
     text = (
-        "🎲 <b>Бинго</b>\n"
-        "Задания <b>1–3</b> — текст ✍️, <b>4–9</b> — фото 📸.\n"
-        "Нажми на номер задания, чтобы сдать его. Порядок любой.\n\n"
+        "<b>BINGO: Business Cup 2.0</b>\n"
+        "Выбери номер задания, чтобы отправить ответ. Задания можно выполнять в любом порядке.\n\n"
         + ("\n".join(tasks) + "\n\n" if tasks else "")
-        + "⬜ не сдано · ⏳ на проверке · ✅ засчитано · ❌ переделать\n\n"
-        f"Засчитано: <b>{done} из {CELLS}</b>"
+        + "<b>Статусы заданий:</b>\n"
+        "⬜ Не выполнено\n⏳ На проверке\n✅ Принято\n❌ Требуется повторная отправка\n\n"
+        f"Принято: <b>{done} из {CELLS}</b> заданий"
     )
     if await is_staff(user_id):
         text = "🧪 <i>Ты OC — это тестовый режим, сдачи придут на проверку как обычно.</i>\n\n" + text
@@ -188,17 +188,26 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
         cell = int(parts[2])
         status = (await db_bingo.card(user_id)).get(cell)
         if status == "approved":
-            await callback.answer(f"Задание {cell} уже засчитано ✅", show_alert=True)
+            await callback.answer(f"Задание {cell} принято ✅", show_alert=True)
             return
         if status == "pending":
             await callback.answer(f"Задание {cell} ещё на проверке ⏳", show_alert=True)
             return
         await state.set_state(BingoInput.waiting)
         await state.update_data(cell=cell)
-        what = "<b>текст</b> ответа одним сообщением ✍️" if kind_of(cell) == "text" else "<b>фото</b> 📸"
-        again = "\n\n<i>В прошлый раз не засчитали — попробуй ещё раз.</i>" if status == "rejected" else ""
+        task = await task_text(cell)
+        task_part = f"\n📝 {esc(task)}" if task else ""
+        if kind_of(cell) == "text":
+            body = (f"<b>Задание {cell} · Текстовый ответ</b>{task_part}\n"
+                    "Отправь ответ одним текстовым сообщением.\n\nЖду твой ответ!")
+        else:
+            body = (f"<b>Задание {cell} · Фото-подтверждение</b>{task_part}\n"
+                    "Отправь фотографию, подтверждающую выполнение задания.\n\n"
+                    "Очень интересно посмотреть, что ты подготовил!")
+        again = ("\n\n<i>Предыдущая отправка задания не была принята. "
+                 "Ознакомься с результатом проверки и отправь новый ответ.</i>") if status == "rejected" else ""
         await callback.message.edit_text(
-            f"{await task_line(cell)}\n\nПришли {what}.{again}",
+            f"{body}{again}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[b("✖️ Отмена", "bgo:grid")]]),
         )
         await callback.answer()
@@ -216,12 +225,12 @@ async def on_answer(message: Message, state: FSMContext, bot: Bot) -> None:
     kind = kind_of(cell)
     if kind == "text":
         if not message.text:
-            await message.answer(f"Задание {cell} — текстовое ✍️ Пришли ответ текстом.")
+            await message.answer(f"Задание {cell} · Текст ✍️\nОтправь ответ одним текстовым сообщением")
             return
         content = message.text.strip()
     else:
         if not message.photo:
-            await message.answer(f"Задание {cell} — с фото 📸 Пришли именно фото (не файлом и не текстом).")
+            await message.answer(f"Задание {cell} · Фото 📸\nОтправь фотографию для подтверждения задания. Не отправляй её файлом.")
             return
         content = message.photo[-1].file_id
 
@@ -229,10 +238,10 @@ async def on_answer(message: Message, state: FSMContext, bot: Bot) -> None:
     await db.save_user(user.id, user.username, user.full_name)
     item_id = await db_bingo.submit(user.id, cell, kind, content)
     if item_id is None:
-        await message.answer(f"Задание {cell} уже на проверке или засчитано 👌", reply_markup=to_card_kb())
+        await message.answer(f"Задание {cell} уже отправлено на проверку или принято. Повторная отправка недоступна.", reply_markup=to_card_kb())
         return
     await message.answer(
-        f"📨 Отправлено на проверку! Ответ придёт сюда. Можно делать следующие.\n\n{await task_line(cell)}",
+        f"📨 Задание {cell} отправлено на проверку! Результат появится в этом чате. Пока можешь выполнять другие задания.",
         reply_markup=to_card_kb(),
     )
     await send_to_review(bot, item_id)
@@ -325,20 +334,20 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
             await db.add_points(user_id, BINGO_POINTS, "bingo", item_id)
         card = await db_bingo.card(user_id)
         done = sum(1 for s in card.values() if s == "approved")
-        await _notify(bot, user_id, f"✅ Бинго: засчитано! ({done} из {CELLS})\n{await task_line(cell)}")
+        await _notify(bot, user_id, f"✅ Задание {cell} принято! Бинго: {done} из {CELLS} заданий выполнено.")
         if done == CELLS and await db_bingo.mark_done(user_id):
-            await _notify(bot, user_id, "🎉 <b>Бинго собрано полностью!</b> Все 9 заданий засчитаны — ты молодец!")
+            await _notify(bot, user_id, "🎉 <b>Бинго собрано!</b> Все 9 заданий приняты. Поздравляю с завершением!")
             for target in await review_targets():
                 try:
                     await bot.send_message(target, f"🎉 {_who(item)} собрал(а) всё бинго — 9 из 9!")
                 except Exception:
                     pass
     else:
-        what = "новый текст" if kind_of(cell) == "text" else "новое фото"
+        what = "новый ответ" if kind_of(cell) == "text" else "новое фото"
         await _notify(
             bot, user_id,
-            f"❌ Бинго: не засчитано.\n{await task_line(cell)}\n\n"
-            f"Переделай и пришли {what}, когда будет удобно — можно пока делать другие задания.",
+            f"❌ Задание {cell} не принято. Попробуй исправить недочёты и отправить {what}. "
+            "Пока можешь выполнять другие задания.",
             redo=cell,
         )
 

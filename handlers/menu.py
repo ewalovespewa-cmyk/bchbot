@@ -63,15 +63,21 @@ def as_user(callback: CallbackQuery, bot: Bot) -> Message:
 
 async def scr_home(user) -> tuple[str, InlineKeyboardMarkup | None]:
     if not await is_staff(user.id):
-        rows, lines = [], [f"Привет, {esc(user.first_name)}! 👋"]
+        name = esc(user.first_name)
+        rows, lines = [], [f"{name}, рад приветствовать тебя в главном меню!"]
         if await is_active():
-            lines.append("🧭 <b>Экспедиция идёт</b> — общайся в чате, выполняй задания и поднимайся в рейтинге!")
+            lines.append("<b>Экспедиция активна.</b> Участвуй в активностях, общайся с другими участниками "
+                         "и набирай баллы для лидерборда.")
             rows.append([b("🏆 Лидерборд", "m:top"), b("⭐ Мои баллы", "m:pts")])
         if await bingo.available_for(user.id):
-            lines.append("🎲 <b>Бинго открыто</b> — сдавай задания по одному, в любом порядке.")
+            lines.append("<b>Бинго открыто.</b> Выполняй задания и отправляй их на проверку в удобном порядке.")
             rows.append([b("🎲 Бинго", "bgo:grid")])
         if not rows:
-            return (f"Привет, {esc(user.first_name)}! 👋\nЭто бот Business Cup. Следи за новостями в чате 😉", None)
+            return (
+                f"Привет, {name}!\n"
+                "Я Cupik, твой цифровой компаньон на Business Cup 2.0. Рад, что ты с нами. Впереди много интересного!",
+                None,
+            )
         return "\n\n".join(lines), kb(*rows)
 
     admin = user.id in ADMIN_IDS

@@ -191,21 +191,26 @@ async def ranking() -> list[tuple[int, int, str, int]]:
 
 def format_board(rows, me: int | None = None) -> str:
     """Чистый лидерборд: заголовок и топ-15. В личке (me задан) — ещё строка про своё место."""
+    from textutil import points as pts
+
     if not rows:
-        return "🧭 <b>Экспедиция</b>\n\nПока никто не набрал баллов — пишите в чат, чтобы открыть рейтинг!"
-    lines = ["🧭 <b>Экспедиция — лидерборд</b>", ""]
+        return ("<b>Экспедиция | Лидерборд</b>\n\nПока рейтинг пуст :(\n"
+                "Стань одним из первых участников, набравших баллы!")
+    lines = ["<b>Экспедиция | Лидерборд</b>", ""]
     for place, user_id, name, total in rows[:EXP_TOP_SIZE]:
         mark = MEDALS.get(place, f"{place}.")
         name = f"<b>{esc(name)}</b>" if user_id == me else esc(name)
-        lines.append(f"{mark} {name} — {fmt(total)}")
+        lines.append(f"{mark} {name} · {pts(total)}")
     if me is not None:
         mine = next((r for r in rows if r[1] == me), None)
         lines.append("")
         if mine is None:
-            lines.append("Тебя пока нет в рейтинге — напиши что-нибудь в чат 🙂")
+            lines.append("Пока у тебя нет баллов в рейтинге :(\n"
+                         "Участвуй в активностях Экспедиции, чтобы получить первые баллы и попасть в лидерборд. Я в тебя верю!")
         elif mine[0] > EXP_TOP_SIZE:
             gap = rows[EXP_TOP_SIZE - 1][3] - mine[3] + 1
-            lines.append(f"Ты на <b>{mine[0]}</b> месте ({fmt(mine[3])} балл.). До топ-{EXP_TOP_SIZE}: {fmt(gap)} балл.")
+            lines.append(f"Твоя позиция: {mine[0]} место ({pts(mine[3])}).\n"
+                         f"До топ-{EXP_TOP_SIZE} осталось набрать {pts(gap)}.")
     return "\n".join(lines)
 
 
@@ -256,20 +261,23 @@ async def points_text(user_id: int) -> str:
     total = await db.get_points(user_id)
     place = next((r[0] for r in await ranking() if r[1] == user_id), None)
     b = await db.points_breakdown(user_id)
+    from textutil import num, plural, points as pts
+
+    days = b["photohunt_days"]
     lines = [
-        f"🧭 <b>Твоя Экспедиция: {fmt(total)} балл.</b>",
-        f"Место в рейтинге: <b>{place}</b>" if place else "В рейтинге тебя пока нет",
+        "<b>Твой результат в EXPEDITION</b>",
+        f"Всего набрано: {pts(total)}",
+        f"Позиция в рейтинге: {place} место" if place else "Позиция в рейтинге: пока нет",
         "",
-        f"💬 Сообщения: {b['messages']}",
-        f"🎙 Голосовые и кружки: {b['voices']}",
-        f"📸 Фото в ФотоХанте: {b['photohunt_days']} (+{fmt(b['photohunt_points'])})",
+        "<b>Начисление баллов</b>",
+        f"Сообщения: {b['messages']}",
+        f"Голосовые и видеосообщения: {b['voices']}",
+        f"Участие в ФотоХанте: {days} {plural(days, 'день', 'дня', 'дней')} (+{num(b['photohunt_points'])})",
     ]
     if b["word_count"]:
-        lines.append(f"✍️ Задания со словами: {b['word_count']} (+{b['word_points']})")
-    if b["photo_count"]:
-        lines.append(f"🖼 Фото-задания: {b['photo_count']} (+{b['photo_points']})")
+        lines.append(f"Текстовые задания: {b['word_count']} (+{num(b['word_points'])})")
     if b["adjust_points"]:
-        lines.append(f"🛠 Корректировка OC: {'+' if b['adjust_points'] > 0 else ''}{fmt(b['adjust_points'])}")
+        lines.append(f"Корректировка OC: {'+' if b['adjust_points'] > 0 else ''}{num(b['adjust_points'])}")
     return "\n".join(lines)
 
 

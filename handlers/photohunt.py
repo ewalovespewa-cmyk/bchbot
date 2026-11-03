@@ -129,15 +129,11 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
         return
 
     post = (
-        "📸 <b>Новое задание ФотоХанта!</b>\n\n"
+        "<b>Новое задание SPOTTED!</b>\n"
+        "Cupik подготовил для тебя сегодня что-то интересное!\n\n"
         f"{esc(text)}\n\n"
-        f"Присылайте фото в этот чат с хэштегом #{esc(hashtag)} в подписи."
+        f"Отправь фотографию в этот чат, добавив хэштег #{esc(hashtag)} в подписи."
     )
-    if await is_revealed():
-        post += (
-            f"\nСегодня — <b>+{fmt(EXP_PHOTOHUNT_DAY_POINTS)}</b> в Экспедицию, "
-            f"завтра — <b>+{fmt(EXP_PHOTOHUNT_LATE_POINTS)}</b> 🧭"
-        )
     try:
         await bot.send_message(chat_id, post, message_thread_id=thread_id)
     except Exception as e:
@@ -271,10 +267,10 @@ async def on_group_photo(message: Message, bot: Bot) -> None:
     await db.save_user(user.id, user.username, user.full_name)
 
     if await db.user_has_approved(task["id"], user.id):
-        await tell_user(bot, user.id, f"📸 Задание #{esc(task['hashtag'])} у тебя уже засчитано 👌", message)
+        await tell_user(bot, user.id, f"Задание #{esc(task['hashtag'])} за сегодня уже принято.\nПовторная отправка не требуется.", message)
         return
     if await db.user_has_pending(task["id"], user.id):
-        await tell_user(bot, user.id, f"📸 Твоё прошлое фото по #{esc(task['hashtag'])} ещё на проверке ⏳", message)
+        await tell_user(bot, user.id, f"Задание #{esc(task['hashtag'])} ожидает проверки.\nРезультат появится в этом чате.", message)
         return
 
     file_id, is_document = image
@@ -340,13 +336,15 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
             log.warning("Не смог обновить сообщение проверки у %s", chat_id)
 
     if approved:
-        reply = f"✅ Фото по заданию #{esc(sub['hashtag'])} засчитано!"
+        from textutil import num, plural
+        reply = f"✅ Задание #{esc(sub['hashtag'])} принято!"
         if await is_revealed():
-            reply += f"\n🧭 +{fmt(points)} в Экспедицию"
+            reply += f"\nНачислено: +{num(points)} {plural(points, 'балл', 'балла', 'баллов')}"
             if late:
-                reply += " (фото прислано не в день задания)"
+                reply += "\nЗа отправку задания на следующий день начисляется половина баллов."
     else:
-        reply = f"❌ Фото по заданию #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
+        reply = (f"❌ Задание #{esc(sub['hashtag'])} не принято.\n"
+                 "Ты можешь отправить другую фотографию для повторной проверки.")
     if approved:
         await react(bot, sub["chat_id"], sub["message_id"])
     await tell_user_about(bot, sub["user_id"], sub["chat_id"], sub["message_id"], reply)
