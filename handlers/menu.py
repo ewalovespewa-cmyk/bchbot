@@ -103,21 +103,31 @@ async def scr_ph(admin: bool = False) -> tuple[str, InlineKeyboardMarkup]:
     has_chat = bool(await db.get_setting("photo_chat_id"))
     chat = "задан ✅" if has_chat else "⚠️ не задан — отправь /setchat в чате делегатов"
     lines = ["📸 <b>ФотоХант</b>", f"Чат: {chat}", ""]
-    rows = [[b("➕ Новое задание", "m:in:task")]]
+    rows = [[b("➕ Новое задание", "m:in:task")],
+            [b("⚪️ Закрыть задание", "m:phclose"), b("🟢 Открыть снова", "m:phopen")]]
     if admin and has_chat:
         rows.append([b("🔄 Сбросить чат ФотоХанта", "m:rs:photo")])
     if not tasks:
-        lines.append("Заданий пока нет. Кнопки «⚪️ Закрыть #хэштег» появятся здесь под каждым заданием.")
-    else:
-        lines.append("<i>Закрыть приём фото по заданию — кнопка «⚪️ Закрыть» ниже.</i>")
-        lines.append("")
+        lines.append("Заданий пока нет.")
     for t in list(tasks)[-10:]:
-        state = "🟢" if t["active"] else "⚪️"
-        lines.append(f"{state} #{esc(t['hashtag'])} — {esc(t['text'])} · ✅ {t['approved']} · ⏳ {t['pending']}")
-        rows.append([b(f"{'⚪️ Закрыть' if t['active'] else '🟢 Открыть'} #{t['hashtag']}",
-                       f"m:pht:{t['id']}:{0 if t['active'] else 1}")])
+        state = "🟢 принимает" if t["active"] else "⚪️ закрыто"
+        lines.append(f"#{esc(t['hashtag'])} — {esc(t['text'])}\n    {state} · ✅ {t['approved']} · ⏳ {t['pending']}")
     rows.append(back())
     return "\n".join(lines), kb(*rows)
+
+
+async def scr_ph_pick(active: bool) -> tuple[str, InlineKeyboardMarkup]:
+    """Выбор задания ФотоХанта, чтобы закрыть (active=True — показываем открытые) или открыть снова."""
+    tasks = [t for t in await db.list_tasks() if bool(t["active"]) == active]
+    if active:
+        title = "⚪️ <b>Закрыть задание</b>\n\nВыбери хэштег — фото по нему больше не будут приниматься."
+        empty = "Открытых заданий сейчас нет."
+    else:
+        title = "🟢 <b>Открыть снова</b>\n\nВыбери хэштег — по нему снова начнут принимать фото."
+        empty = "Закрытых заданий нет."
+    rows = [[b(f"#{t['hashtag']}", f"m:pht:{t['id']}:{0 if active else 1}")] for t in list(tasks)[-15:]]
+    rows.append(back("ph"))
+    return title + ("" if tasks else f"\n\n<i>{empty}</i>"), kb(*rows)
 
 
 async def scr_exp(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
@@ -242,6 +252,10 @@ async def render(screen: str, user, bot: Bot) -> tuple[str, InlineKeyboardMarkup
         return await scr_home(user)
     if screen == "ph":
         return await scr_ph(admin)
+    if screen == "phclose":
+        return await scr_ph_pick(True)
+    if screen == "phopen":
+        return await scr_ph_pick(False)
     if screen == "exp":
         return await scr_exp(admin)
     if screen == "chats":
