@@ -1,13 +1,14 @@
-"""Бинго — офлайн-игра: 9 заданий (1–3 — текст, 4–9 — фото), каждое сдаётся и проверяется отдельно.
+"""Бинго — офлайн-игра: 14 заданий (08, 10 — текст; 09 — фото + короткий ответ; остальные — фото/скриншот),
+каждое сдаётся и проверяется отдельно.
 
 Секретность: пока приём выключен, бинго нигде не видно — ни кнопок, ни команд, бот молчит на фото.
 Админ включает приём: меню → 🎲 Бинго → «Включить приём» (или /bingo on).
 
-Делегат: в меню (/start) появляется «🎲 Бинго» — карточка 3×3:
+Делегат: в меню (/start) появляется «🎲 Бинго» — карточка из 14 номеров:
   ⬜ не сдано · ⏳ на проверке · ✅ засчитано · ❌ нужно переделать.
-Жмёт на номер → бот просит текст (1–3) или фото (4–9) → задание сразу уходит OC на проверку.
+Жмёт на номер → бот показывает задание и просит текст / фото → задание сразу уходит OC на проверку.
 Порядок любой; на ❌ сразу приходит сообщение, переделать можно когда угодно.
-Когда все 9 засчитаны — поздравление делегату и сообщение OC.
+Когда все 14 засчитаны — поздравление делегату и сообщение OC.
 
 OC: каждое задание приходит отдельным сообщением (в общий чат OC или в личку) с ✅ / ❌.
 Решает первый нажавший. Для проверки со своего аккаунта: меню → 🎲 Бинго → 🧪 «как делегат».
@@ -36,8 +37,55 @@ from roles import IsAdmin, IsStaff, is_staff, review_targets
 router = Router()
 log = logging.getLogger(__name__)
 
-CELLS = 9
-TEXT_CELLS = {1, 2, 3}  # остальные — фото
+# Задания: (название, описание, подтверждение). Тексты можно поправить в меню → Бинго → ✏️ Тексты заданий.
+TASKS = {
+    1: ("LINKED IN",
+        "Опубликуй пост в LinkedIn о своём опыте участия в Business Cup и отметь “AIESEC in Kazakhstan” и “Zimran”.",
+        "скриншот опубликованного поста."),
+    2: ("TEAM CHECK",
+        "Сделай фото своей команды у баннера Business Cup.",
+        "фото команды."),
+    3: ("NEW CONNECTION",
+        "Познакомьтесь с другой командой и сделайте совместное селфи полными составами обеих команд.",
+        "совместное фото."),
+    4: ("JUST POSE",
+        "Сделай с командой фото с смешными позами.",
+        "фото команды."),
+    5: ("HYDRATION CHECK",
+        "Напомни тиммейту попить воды и сделайте фото со своими бутылками или стаканами.",
+        "фото с водой."),
+    6: ("PROJECT RUN MODE",
+        "Покажи, как выглядит рабочее место твоей команды во время Project Run.",
+        "фото рабочего места."),
+    7: ("BC ON YOU",
+        "Покажи свой мерч Business Cup - например, браслет на руке. Можно всей командой!",
+        "фото с мерчем."),
+    8: ("DELULU IS THE SOLULU",
+        "Придумай самое амбициозное название или слоган для своего продукта. Чем смелее, тем лучше.",
+        "текст."),
+    9: ("MEET AIESEC",
+        "Познакомься с одним AIESEC-ером, сделай совместное фото и узнай, что ему дал AIESEC. Поделись ответом.",
+        "фото и короткий ответ."),
+    10: ("HELP US COOK",
+         "Предложи одну идею, которая сделает будущий Business Cup ещё интереснее.",
+         "текст."),
+    11: ("SHOUT-OUT",
+         "Поделись одним впечатлением от  Business Cup 2.0 в Instagram Stories и отметь @aieseckz и @zimran.team",
+         "скриншот сторис."),
+    12: ("TAP FOLLOW",
+         "Подпишись на Instagram одного из наших партнёров.",
+         "скриншот подписки."),
+    13: ("CHEAT MEAL",
+         "Отметь в Instagram Stories продукцию партнеров  на кофе брейке.",
+         "фото."),
+    14: ("AIESEC.ORG REGISTRATION",
+         "Зарегистрируйся на aiesec.org и стань на шаг ближе к международному сообществу AIESEC.",
+         "скриншот регистрации или личного кабинета."),
+}
+CELLS = len(TASKS)
+TEXT_CELLS = {8, 10}   # только текст
+BOTH_CELLS = {9}       # фото + короткий ответ в подписи; остальные — фото / скриншот
+ROW = 4                # номеров в ряду карточки
 BINGO_POINTS = int(os.getenv("BINGO_POINTS", "0"))
 ICON = {None: "⬜", "pending": "⏳", "approved": "✅", "rejected": "❌"}
 
@@ -51,7 +99,24 @@ def esc(text: str | None) -> str:
 
 
 def kind_of(cell: int) -> str:
-    return "text" if cell in TEXT_CELLS else "photo"
+    if cell in TEXT_CELLS:
+        return "text"
+    return "both" if cell in BOTH_CELLS else "photo"
+
+
+KIND_LABEL = {"text": "Текстовый ответ", "photo": "Фото-подтверждение", "both": "Фото + короткий ответ"}
+KIND_SHORT = {"text": "текст", "photo": "фото", "both": "фото + ответ"}
+KIND_ICON = {"text": "✍️", "photo": "📸", "both": "📸✍️"}
+
+
+def title(cell: int) -> str:
+    """«01. LINKED IN»"""
+    return f"{cell:02d}. {TASKS[cell][0]}"
+
+
+def cell_rows(prefix: str, label=lambda n: str(n)) -> list[list[InlineKeyboardButton]]:
+    nums = list(range(1, CELLS + 1))
+    return [[b(label(n), f"{prefix}{n}") for n in nums[i:i + ROW]] for i in range(0, CELLS, ROW)]
 
 
 def b(text: str, data: str) -> InlineKeyboardButton:
@@ -66,19 +131,25 @@ async def is_open() -> bool:
 DISABLED_TEXT = "🔒 Бинго отключено до проджект рана — делегаты его нигде не видят. Включу по твоей команде."
 
 
-async def task_text(cell: int) -> str | None:
-    """Текст задания, который задали OC (меню → Бинго → Тексты заданий). None — не задан."""
-    return await db.get_setting(f"bingo_task_{cell}")
+def default_text(cell: int) -> str:
+    _, body, proof = TASKS[cell]
+    return f"{body}\nПодтверждение: {proof}"
+
+
+async def custom_text(cell: int) -> str | None:
+    """Текст, который OC поменяли в меню. None — используется стандартный."""
+    return await db.get_setting(f"bingo_v2_task_{cell}")
+
+
+async def task_text(cell: int) -> str:
+    """Описание задания (без названия): своё от OC или стандартное."""
+    return await custom_text(cell) or default_text(cell)
 
 
 async def set_task_text(cell: int, text: str) -> None:
-    await db.set_setting(f"bingo_task_{cell}", text.strip() or None)
-
-
-async def task_line(cell: int) -> str:
-    """«📝 Задание 6: Сфоткайся с ментором» — напоминание, что именно нужно сделать."""
-    t = await task_text(cell)
-    return f"📝 <b>Задание {cell}:</b> {esc(t)}" if t else f"📝 <b>Задание {cell}</b>"
+    """«-» — вернуть стандартный текст."""
+    text = text.strip()
+    await db.set_setting(f"bingo_v2_task_{cell}", None if text in {"", "-"} else text)
 
 
 async def available_for(user_id: int) -> bool:
@@ -130,7 +201,8 @@ async def status_text() -> str:
         f"Ждут проверки: {s['pending']}\n"
         f"Засчитано заданий: {s['approved']} · на переделку: {s['rejected']}\n"
         f"Участвуют: {s['people']} · собрали всё бинго: {s['done']}\n\n"
-        "Задания 1–3 — текст, 4–9 — фото. Каждое приходит на проверку отдельно."
+        f"Заданий: {CELLS}. 08 и 10 — текст, 09 — фото + ответ, остальные — фото/скриншот. "
+        "Каждое приходит на проверку отдельно."
     )
 
 
@@ -139,22 +211,13 @@ async def status_text() -> str:
 async def grid(user_id: int) -> tuple[str, InlineKeyboardMarkup]:
     card = await db_bingo.card(user_id)
     done = sum(1 for s in card.values() if s == "approved")
-    rows = []
-    for r in range(3):
-        rows.append([
-            b(f"{ICON[card.get(n)]} {n}", f"bgo:c:{n}")
-            for n in range(r * 3 + 1, r * 3 + 4)
-        ])
+    rows = cell_rows("bgo:c:", lambda n: f"{ICON[card.get(n)]} {n}")
     rows.append([b("⬅️ Главное меню", "m:home")])
-    tasks = []
-    for n in range(1, CELLS + 1):
-        t = await task_text(n)
-        if t:
-            tasks.append(f"{ICON[card.get(n)]} <b>{n}.</b> {esc(t)}")
+    tasks = [f"{ICON[card.get(n)]} {esc(title(n))}" for n in range(1, CELLS + 1)]
     text = (
         "<b>BINGO: Business Cup 2.0</b>\n"
         "Выбери номер задания, чтобы отправить ответ. Задания можно выполнять в любом порядке.\n\n"
-        + ("\n".join(tasks) + "\n\n" if tasks else "")
+        + "\n".join(tasks) + "\n\n"
         + "<b>Статусы заданий:</b>\n"
         "⬜ Не выполнено\n⏳ На проверке\n✅ Принято\n❌ Требуется повторная отправка\n\n"
         f"Принято: <b>{done} из {CELLS}</b> заданий"
@@ -195,13 +258,17 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
             return
         await state.set_state(BingoInput.waiting)
         await state.update_data(cell=cell)
-        task = await task_text(cell)
-        task_part = f"\n📝 {esc(task)}" if task else ""
-        if kind_of(cell) == "text":
-            body = (f"<b>Задание {cell} · Текстовый ответ</b>{task_part}\n"
+        kind = kind_of(cell)
+        task_part = f"\n\n📝 <b>{esc(title(cell))}</b>\n{esc(await task_text(cell))}\n\n"
+        if kind == "text":
+            body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
                     "Отправь ответ одним текстовым сообщением.\n\nЖду твой ответ!")
+        elif kind == "both":
+            body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
+                    "Отправь фотографию и напиши короткий ответ в подписи к ней — одним сообщением.\n\n"
+                    "Очень интересно посмотреть, что ты подготовил!")
         else:
-            body = (f"<b>Задание {cell} · Фото-подтверждение</b>{task_part}\n"
+            body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
                     "Отправь фотографию, подтверждающую выполнение задания.\n\n"
                     "Очень интересно посмотреть, что ты подготовил!")
         again = ("\n\n<i>Предыдущая отправка задания не была принята. "
@@ -228,6 +295,14 @@ async def on_answer(message: Message, state: FSMContext, bot: Bot) -> None:
             await message.answer(f"Задание {cell} · Текст ✍️\nОтправь ответ одним текстовым сообщением")
             return
         content = message.text.strip()
+    elif kind == "both":
+        if not message.photo:
+            await message.answer(f"Задание {cell} · Фото + ответ 📸✍️\nОтправь фотографию (не файлом) и напиши короткий ответ в подписи к ней.")
+            return
+        if not (message.caption or "").strip():
+            await message.answer(f"Задание {cell} · Фото + ответ 📸✍️\nФото есть, но не хватает ответа. Отправь фото ещё раз и напиши короткий ответ в подписи к нему.")
+            return
+        content = message.photo[-1].file_id + "\n" + message.caption.strip()
     else:
         if not message.photo:
             await message.answer(f"Задание {cell} · Фото 📸\nОтправь фотографию для подтверждения задания. Не отправляй её файлом.")
@@ -269,13 +344,25 @@ def _who(item) -> str:
     return who
 
 
-def _header(item, task: str | None = None) -> str:
-    what = "текст" if item["kind"] == "text" else "фото"
-    head = f"🎲 <b>Бинго · задание {item['cell']}</b> ({what})\nОт: {_who(item)}"
-    if task:
-        head += f"\n📝 {esc(task)}"
+def _photo_and_answer(item) -> tuple[str | None, str | None]:
+    """(file_id фото, текст ответа) для любой сдачи."""
     if item["kind"] == "text":
-        head += f"\n\n«{esc(item['content'])}»"
+        return None, item["content"]
+    if item["kind"] == "both":
+        file_id, _, answer = item["content"].partition("\n")
+        return file_id, answer
+    return item["content"], None
+
+
+def _header(item) -> str:
+    cell = item["cell"]
+    head = (f"🎲 <b>Бинго · {esc(title(cell)) if cell in TASKS else cell}</b> "
+            f"({KIND_SHORT.get(item['kind'], item['kind'])})\nОт: {_who(item)}")
+    _, answer = _photo_and_answer(item)
+    if answer:
+        if item["kind"] == "both" and len(answer) > 600:  # подпись к фото ограничена 1024 символами
+            answer = answer[:600] + "…"
+        head += f"\n\n«{esc(answer)}»"
     return head
 
 
@@ -288,16 +375,17 @@ def _review_kb(item_id: int) -> InlineKeyboardMarkup:
 
 async def send_to_review(bot: Bot, item_id: int) -> None:
     item = await db_bingo.get(item_id)
-    text, kb = _header(item, await task_text(item["cell"])), _review_kb(item_id)
+    text, kb = _header(item), _review_kb(item_id)
+    photo, _ = _photo_and_answer(item)
     if await is_staff(item["user_id"]):
         text = "🧪 <i>тест OC</i>\n" + text
     for target in await review_targets():
         try:
-            if item["kind"] == "photo":
-                sent = await bot.send_photo(target, item["content"], caption=text, reply_markup=kb)
+            if photo:
+                sent = await bot.send_photo(target, photo, caption=text, reply_markup=kb)
             else:
                 sent = await bot.send_message(target, text, reply_markup=kb)
-            await db_bingo.add_msg(item_id, target, sent.message_id, item["kind"] == "photo")
+            await db_bingo.add_msg(item_id, target, sent.message_id, bool(photo))
         except Exception:
             log.warning("Бинго %s не доставлено на проверку в %s (нет /start или бот не в чате?)", item_id, target)
 
@@ -317,7 +405,7 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         return
     item = await db_bingo.get(item_id)
     who = esc(callback.from_user.full_name)
-    text = _header(item, await task_text(item["cell"])) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
+    text = _header(item) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
     for chat_id, message_id, is_photo in await db_bingo.msgs(item_id):
         try:
             if is_photo:
@@ -336,14 +424,14 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         done = sum(1 for s in card.values() if s == "approved")
         await _notify(bot, user_id, f"✅ Задание {cell} принято! Бинго: {done} из {CELLS} заданий выполнено.")
         if done == CELLS and await db_bingo.mark_done(user_id):
-            await _notify(bot, user_id, "🎉 <b>Бинго собрано!</b> Все 9 заданий приняты. Поздравляю с завершением!")
+            await _notify(bot, user_id, f"🎉 <b>Бинго собрано!</b> Все {CELLS} заданий приняты. Поздравляю с завершением!")
             for target in await review_targets():
                 try:
-                    await bot.send_message(target, f"🎉 {_who(item)} собрал(а) всё бинго — 9 из 9!")
+                    await bot.send_message(target, f"🎉 {_who(item)} собрал(а) всё бинго — {CELLS} из {CELLS}!")
                 except Exception:
                     pass
     else:
-        what = "новый ответ" if kind_of(cell) == "text" else "новое фото"
+        what = {"text": "новый ответ", "both": "новое фото с ответом"}.get(kind_of(cell), "новое фото")
         await _notify(
             bot, user_id,
             f"❌ Задание {cell} не принято. Попробуй исправить недочёты и отправить {what}. "

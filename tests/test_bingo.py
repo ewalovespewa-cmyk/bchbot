@@ -28,4 +28,6 @@ async def test_cells_independent(tmp_path, monkeypatch):
 def test_kinds():
     from handlers.bingo import kind_of
 
-    assert [kind_of(n) for n in range(1, 10)] == ["text"] * 3 + ["photo"] * 6
+    kinds = [kind_of(n) for n in range(1, 15)]
+    assert kinds[7] == kinds[9] == "text" and kinds[8] == "both"
+    assert kinds.count("photo") == 11

@@ -178,14 +178,14 @@ async def scr_bg(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
 
 
 async def scr_bgt() -> tuple[str, InlineKeyboardMarkup]:
-    lines = ["✏️ <b>Тексты заданий бинго</b>", "",
-             "Делегат увидит текст задания в карточке и когда будет его сдавать — чтобы не путался.",
-             "Нажми номер, чтобы задать или поменять текст.", ""]
+    lines = ["✏️ <b>Задания бинго</b>", "",
+             "✍️ — текст · 📸 — фото/скриншот · 📸✍️ — фото + ответ в подписи.",
+             "Делегат видит название в карточке, а полный текст — когда открывает задание.",
+             "Нажми номер, чтобы поменять текст.", ""]
     for n in range(1, bingo.CELLS + 1):
-        t = await bingo.task_text(n)
-        kind = "✍️" if bingo.kind_of(n) == "text" else "📸"
-        lines.append(f"{kind} <b>{n}.</b> {esc(t) if t else '<i>— не задан —</i>'}")
-    rows = [[b(str(n), f"m:in:bgt:{n}") for n in range(r * 3 + 1, r * 3 + 4)] for r in range(3)]
+        mark = " <i>(изменён)</i>" if await bingo.custom_text(n) else ""
+        lines.append(f"{bingo.KIND_ICON[bingo.kind_of(n)]} <b>{esc(bingo.title(n))}</b>{mark}")
+    rows = bingo.cell_rows("m:in:bgt:")
     rows.append(back("bg"))
     return "\n".join(lines), kb(*rows)
 
@@ -346,7 +346,8 @@ async def on_input(message: Message, state: FSMContext, bot: Bot) -> None:
     elif action.startswith("bgt:"):
         n = int(action.split(":")[1])
         await bingo.set_task_text(n, text)
-        await message.answer(f"✅ Текст задания {n} сохранён — делегаты увидят его в карточке и при сдаче.")
+        await message.answer(f"✅ Текст задания {n} сохранён." if text.strip() not in {"", "-"}
+                             else f"↩️ Для задания {n} вернул стандартный текст.")
     await show(message, back_to, bot)
 
 
@@ -396,8 +397,9 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             n = int(parts[3])
             current = await bingo.task_text(n)
             prompt = (
-                f"✏️ Пришли текст <b>задания {n}</b> бинго — делегаты увидят его в карточке и когда будут сдавать."
-                + (f"\n\nСейчас: <i>{esc(current)}</i>" if current else "")
+                f"✏️ <b>{esc(bingo.title(n))}</b>\n\nСейчас:\n<i>{esc(current)}</i>\n\n"
+                "Пришли новый текст задания (описание и строку «Подтверждение: …»). "
+                "Название останется прежним. Отправь «-», чтобы вернуть стандартный текст."
             )
             await ask(callback, state, f"bgt:{n}", prompt, "bgt")
             return

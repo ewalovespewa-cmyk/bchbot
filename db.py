@@ -154,8 +154,8 @@ CREATE TABLE IF NOT EXISTS bingo_review_msgs (
 CREATE TABLE IF NOT EXISTS bingo_items (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL,
-    cell INTEGER NOT NULL,                    -- 1..9
-    kind TEXT NOT NULL,                       -- 'text' / 'photo'
+    cell INTEGER NOT NULL,                    -- 1..14
+    kind TEXT NOT NULL,                       -- 'text' / 'photo' / 'both' (фото + ответ)
     content TEXT NOT NULL,                    -- текст ответа или file_id фото
     status TEXT NOT NULL DEFAULT 'pending',   -- pending / approved / rejected
     reviewer_id INTEGER,
