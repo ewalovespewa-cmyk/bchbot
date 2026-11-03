@@ -63,7 +63,15 @@ async def configured_chats() -> dict[int, list[str]]:
         if chat_id:
             uses.setdefault(int(chat_id), []).append(what)
 
-    add(await db.get_setting("photo_chat_id"), "ФотоХант (/setchat)")
+    photo_thread = await db.get_setting("photo_thread_id")
+    photo_what = "ФотоХант (/setchat)"
+    if photo_thread:
+        topic = await db.get_setting("photo_topic_title")
+        same = any(str(t) == photo_thread for _c, t, _ in await db.list_exp_tracks())
+        photo_what += (f" → тема «{esc(topic)}»" if topic else " → тема")
+        if same:
+            photo_what += " (та же, что у Экспедиции)"
+    add(await db.get_setting("photo_chat_id"), photo_what)
     add(await db.get_setting("review_chat_id"), "чат OC для проверки (/setreviewchat)")
     for chat_id, thread_id, title in await db.list_exp_tracks():
         add(chat_id, f"Экспедиция: {title or 'чат'}" + (" (тема)" if thread_id else ""))

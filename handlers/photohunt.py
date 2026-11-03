@@ -79,9 +79,15 @@ async def cmd_setchat(message: Message, bot: Bot) -> None:
     thread_id = message.message_thread_id if message.is_topic_message else None
     await db.set_setting("photo_chat_id", str(message.chat.id))
     await db.set_setting("photo_thread_id", str(thread_id) if thread_id else None)
-    where = "в этой теме" if thread_id else "в этом чате"
-    from handlers.expedition import _quiet_confirm
-    await _quiet_confirm(message, bot, f"✅ ФотоХант теперь работает {where} («{esc(message.chat.title)}»). Задания буду публиковать сюда.")
+    from handlers.expedition import _quiet_confirm, topic_title
+    topic = topic_title(message) if thread_id else None
+    await db.set_setting("photo_topic_title", topic)
+    if thread_id:
+        where = f"в теме «{esc(topic)}»" if topic else "в этой теме"
+        where += f" чата «{esc(message.chat.title)}»"
+    else:
+        where = f"в чате «{esc(message.chat.title)}»"
+    await _quiet_confirm(message, bot, f"✅ ФотоХант теперь работает {where}. Задания буду публиковать сюда, фото из других тем не принимаются.")
 
 
 @router.message(Command("setchat"), F.chat.type == "private", IsAdmin())
