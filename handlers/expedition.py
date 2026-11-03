@@ -32,6 +32,7 @@ import db
 from config import (
     EXP_COOLDOWN_SECONDS,
     EXP_MESSAGE_POINTS,
+    EXP_PRIZE_PLACES,
     EXP_TOP_SIZE,
     EXP_VOICE_POINTS,
     LOCAL_TZ,
@@ -198,9 +199,13 @@ def format_board(rows, me: int | None = None) -> str:
                 "Стань одним из первых участников, набравших баллы!")
     lines = ["<b>Экспедиция | Лидерборд</b>", ""]
     for place, user_id, name, total in rows[:EXP_TOP_SIZE]:
+        if place == EXP_PRIZE_PLACES + 1:
+            lines += ["", "<b>Дополнительные призы</b>"]
         mark = MEDALS.get(place, f"{place}.")
         name = f"<b>{esc(name)}</b>" if user_id == me else esc(name)
         lines.append(f"{mark} {name} · {pts(total)}")
+    lines += ["", f"🎁 Топ-{EXP_PRIZE_PLACES} получают основные призы, участники на местах "
+                  f"{EXP_PRIZE_PLACES + 1}–{EXP_TOP_SIZE} получают дополнительные призы."]
     if me is not None:
         mine = next((r for r in rows if r[1] == me), None)
         lines.append("")

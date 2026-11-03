@@ -19,6 +19,7 @@ GROUPS = {"group", "supergroup"}
 
 HELP_EXPEDITION = (
     "/top – Лидерборд Экспедиции\n"
+    "/points – Мои баллы и позиция в рейтинге\n"
 )
 HELP_STAFF = (
     "\n\n<b>📸 ФотоХант (для OC):</b>\n"

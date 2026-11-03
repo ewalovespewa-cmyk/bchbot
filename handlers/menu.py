@@ -98,13 +98,19 @@ async def scr_home(user) -> tuple[str, InlineKeyboardMarkup | None]:
     return text, kb(*rows)
 
 
-async def scr_ph() -> tuple[str, InlineKeyboardMarkup]:
+async def scr_ph(admin: bool = False) -> tuple[str, InlineKeyboardMarkup]:
     tasks = await db.list_tasks()
-    chat = "задан ✅" if await db.get_setting("photo_chat_id") else "⚠️ не задан — отправь /setchat в чате делегатов"
+    has_chat = bool(await db.get_setting("photo_chat_id"))
+    chat = "задан ✅" if has_chat else "⚠️ не задан — отправь /setchat в чате делегатов"
     lines = ["📸 <b>ФотоХант</b>", f"Чат: {chat}", ""]
     rows = [[b("➕ Новое задание", "m:in:task")]]
+    if admin and has_chat:
+        rows.append([b("🔄 Сбросить чат ФотоХанта", "m:rs:photo")])
     if not tasks:
-        lines.append("Заданий пока нет.")
+        lines.append("Заданий пока нет. Кнопки «⚪️ Закрыть #хэштег» появятся здесь под каждым заданием.")
+    else:
+        lines.append("<i>Закрыть приём фото по заданию — кнопка «⚪️ Закрыть» ниже.</i>")
+        lines.append("")
     for t in list(tasks)[-10:]:
         state = "🟢" if t["active"] else "⚪️"
         lines.append(f"{state} #{esc(t['hashtag'])} — {esc(t['text'])} · ✅ {t['approved']} · ⏳ {t['pending']}")
@@ -235,7 +241,7 @@ async def render(screen: str, user, bot: Bot) -> tuple[str, InlineKeyboardMarkup
     if screen == "home":
         return await scr_home(user)
     if screen == "ph":
-        return await scr_ph()
+        return await scr_ph(admin)
     if screen == "exp":
         return await scr_exp(admin)
     if screen == "chats":
@@ -427,6 +433,9 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             await db.set_setting("photo_chat_id", None)
             await db.set_setting("photo_thread_id", None)
             await callback.answer("Чат делегатов сброшен. Привязать заново: /setchat в нужном чате", show_alert=True)
+            if callback.message.text and callback.message.text.startswith("📸"):
+                await show(callback, "ph", bot)
+                return
         elif what == "review":
             await db.set_setting("review_chat_id", None)
             await callback.answer("Чат OC сброшен — фото на проверку теперь приходят в личку", show_alert=True)
