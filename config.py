@@ -35,3 +35,8 @@ EXP_PRIZE_PLACES = int(os.getenv("EXP_PRIZE_PLACES", "10"))
 PHASE_WORD_POINTS = int(os.getenv("PHASE_WORD_POINTS", "5"))     # фаза 1: предложение со словом
 PHASE_WORD_MIN_WORDS = int(os.getenv("PHASE_WORD_MIN_WORDS", "3"))  # минимум слов в «предложении»
 PHASE_PHOTO_POINTS = int(os.getenv("PHASE_PHOTO_POINTS", "10"))  # фаза 2: засчитанное фото
+
+# ---- Бинго: пока выключено целиком (будет на проджект ране) ----
+# 0 — делегаты бинго не видят нигде, даже если нажать «Включить приём»; OC может готовить тексты и тестировать.
+# 1 — бинго доступно, приём включается кнопкой в меню.
+BINGO_ENABLED = os.getenv("BINGO_ENABLED", "0").strip().lower() in {"1", "true", "yes"}

@@ -80,7 +80,7 @@ async def scr_home(user) -> tuple[str, InlineKeyboardMarkup | None]:
     text = (
         f"🛠 <b>Панель OC</b> ({'админ' if admin else 'модератор'})\n\n"
         f"🧭 Экспедиция: {exp}\n"
-        f"🎲 Бинго: {'🟢 приём включён' if await bingo.is_open() else '⚪️ приём выключен'}\n"
+        f"🎲 Бинго: {('🟢 приём включён' if await bingo.is_open() else '⚪️ приём выключен') if bingo.BINGO_ENABLED else '🔒 отключено до проджект рана'}\n"
         f"📨 Проверка фото: {review}"
     )
     rows = [
@@ -147,7 +147,7 @@ async def scr_words() -> tuple[str, InlineKeyboardMarkup]:
 
 async def scr_bg(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     rows = []
-    if admin:
+    if admin and bingo.BINGO_ENABLED:
         rows.append([b("⚪️ Выключить приём", "m:bg:off")] if await bingo.is_open() else [b("🟢 Включить приём", "m:bg:on")])
     rows.append([b("✏️ Тексты заданий", "m:bgt")])
     rows.append([b("🧪 Открыть карточку как делегат", "bgo:grid")])
@@ -408,6 +408,9 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await show(callback, "exp", bot, new=True)
         return
     if key == "bg" and len(parts) > 2:
+        if not bingo.BINGO_ENABLED:
+            await callback.answer(bingo.DISABLED_TEXT, show_alert=True)
+            return
         await db.set_setting("bingo_open", "1" if parts[2] == "on" else "0")
         await callback.answer("Приём бинго включён" if parts[2] == "on" else "Приём бинго выключен")
         await show(callback, "bg", bot)

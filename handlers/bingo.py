@@ -30,6 +30,7 @@ import db_bingo
 from integration import access as bc_access
 from integration import config as bc_config
 from integration.gate import NEED_CHECKIN_TEXT
+from config import BINGO_ENABLED
 from roles import IsAdmin, IsStaff, is_staff, review_targets
 
 router = Router()
@@ -58,7 +59,11 @@ def b(text: str, data: str) -> InlineKeyboardButton:
 
 
 async def is_open() -> bool:
-    return (await db.get_setting("bingo_open")) == "1"
+    """Приём включён и бинго вообще разрешено (BINGO_ENABLED). Пока не разрешено — всегда False."""
+    return BINGO_ENABLED and (await db.get_setting("bingo_open")) == "1"
+
+
+DISABLED_TEXT = "🔒 Бинго отключено до проджект рана — делегаты его нигде не видят. Включу по твоей команде."
 
 
 async def task_text(cell: int) -> str | None:
@@ -94,6 +99,9 @@ async def available_for(user_id: int) -> bool:
 async def cmd_bingo(message: Message, command: CommandObject) -> None:
     arg = (command.args or "").strip().lower()
     if arg in {"on", "off", "вкл", "выкл"}:
+        if not BINGO_ENABLED:
+            await message.answer(DISABLED_TEXT)
+            return
         if not await IsAdmin()(message):
             await message.answer("Включать и выключать бинго может только админ.")
             return
@@ -109,6 +117,12 @@ async def cmd_bingo(message: Message, command: CommandObject) -> None:
 
 
 async def status_text() -> str:
+    if not BINGO_ENABLED:
+        return (
+            "🎲 <b>Бинго</b>\n"
+            "Приём: 🔒 отключено до проджект рана — делегаты бинго нигде не видят.\n\n"
+            "Пока можно заранее вписать тексты заданий и проверить карточку как делегат."
+        )
     s = await db_bingo.stats()
     return (
         f"🎲 <b>Бинго</b>\n"
