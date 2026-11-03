@@ -8,8 +8,9 @@
 4. Бот присылает фото админу и всем модераторам в личку с кнопками ✅ / ❌.
 5. Первый, кто нажал, принимает решение: у остальных сообщение обновляется,
    делегату бот отвечает в чате.
-6. Связь с Экспедицией: за каждый день, когда у человека засчитали хотя бы одно фото,
-   он получает бонус EXP_PHOTOHUNT_DAY_POINTS (по умолчанию +5). День — когда фото прислали.
+6. Связь с Экспедицией: засчитанное фото даёт EXP_PHOTOHUNT_DAY_POINTS (+5), если его прислали
+   в день публикации задания, и EXP_PHOTOHUNT_LATE_POINTS (+2.5), если позже. Закрывает приём OC
+   (кнопкой или /close). Одно задание в день × 7 дней = максимум 35.
    Дни копятся всегда, но пока Экспедиция скрыта, в текстах о ней не говорим.
 """
 import html
@@ -28,7 +29,9 @@ from aiogram.types import (
 
 import db
 from chatutil import ephemeral, react, tell_user, tell_user_about
-from config import EXP_PHOTOHUNT_DAY_POINTS, LOCAL_TZ
+from datetime import datetime, timezone
+
+from config import EXP_PHOTOHUNT_DAY_POINTS, EXP_PHOTOHUNT_LATE_POINTS, LOCAL_TZ
 from handlers.expedition import is_revealed
 from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
 
@@ -40,6 +43,27 @@ HASHTAG_RE = re.compile(r"^#?(\w{2,64})$")
 
 def esc(text: str | None) -> str:
     return html.escape(text or "")
+
+
+def fmt(n) -> str:
+    """5.0 → «5», 2.5 → «2.5»."""
+    return f"{float(n):g}"
+
+
+def _local_day(utc_text: str | None) -> str | None:
+    """'2026-11-03 18:40:00' (UTC из базы) → дата по времени проекта."""
+    if not utc_text:
+        return None
+    dt = datetime.strptime(utc_text[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+    return dt.astimezone(LOCAL_TZ).date().isoformat()
+
+
+def photo_points(sub) -> tuple[float, bool]:
+    """(баллы, опоздал?) — в день задания +5, позже +2.5. День фото — когда его прислали."""
+    task_day = _local_day(sub["task_created"])
+    photo_day = sub["day"] or _local_day(sub["created_at"])
+    late = bool(task_day and photo_day and photo_day > task_day)
+    return (EXP_PHOTOHUNT_LATE_POINTS if late else EXP_PHOTOHUNT_DAY_POINTS), late
 
 
 # ---------------------------------------------------------------- настройка чата
@@ -110,7 +134,10 @@ async def cmd_task(message: Message, command: CommandObject, bot: Bot) -> None:
         f"Присылайте фото в этот чат с хэштегом #{esc(hashtag)} в подписи."
     )
     if await is_revealed():
-        post += f"\nЗасчитанное фото = <b>+{EXP_PHOTOHUNT_DAY_POINTS}</b> в Экспедицию (бонус раз в день) 🧭"
+        post += (
+            f"\nСегодня — <b>+{fmt(EXP_PHOTOHUNT_DAY_POINTS)}</b> в Экспедицию, "
+            f"завтра — <b>+{fmt(EXP_PHOTOHUNT_LATE_POINTS)}</b> 🧭"
+        )
     try:
         await bot.send_message(chat_id, post, message_thread_id=thread_id)
     except Exception as e:
@@ -296,10 +323,10 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         return
 
     sub = await db.get_submission(sub_id)
-    bonus = False
+    points, late = 0, False
     if approved:
-        day = sub["day"] or sub["created_at"][:10]
-        bonus = await db.award_photohunt_day(sub["user_id"], day, sub_id, EXP_PHOTOHUNT_DAY_POINTS)
+        points, late = photo_points(sub)
+        await db.add_points(sub["user_id"], points, "photohunt_day", sub_id)
 
     reviewer = esc(callback.from_user.full_name)
     decision = f"✅ Засчитал(а): {reviewer}" if approved else f"❌ Отклонил(а): {reviewer}"
@@ -315,10 +342,9 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
     if approved:
         reply = f"✅ Фото по заданию #{esc(sub['hashtag'])} засчитано!"
         if await is_revealed():
-            if bonus:
-                reply += f"\n🧭 +{EXP_PHOTOHUNT_DAY_POINTS} в Экспедицию за участие в ФотоХанте сегодня"
-            else:
-                reply += "\n(бонус Экспедиции за этот день уже получен)"
+            reply += f"\n🧭 +{fmt(points)} в Экспедицию"
+            if late:
+                reply += " (фото прислано не в день задания)"
     else:
         reply = f"❌ Фото по заданию #{esc(sub['hashtag'])} не засчитано. Можно прислать другое."
     if approved:

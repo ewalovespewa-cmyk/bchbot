@@ -386,7 +386,7 @@ async def get_submission(submission_id: int):
     async with _connect() as db:
         db.row_factory = aiosqlite.Row
         cur = await db.execute(
-            """SELECT s.*, t.hashtag, t.text AS task_text, t.points,
+            """SELECT s.*, t.hashtag, t.text AS task_text, t.points, t.created_at AS task_created,
                       u.full_name, u.username
                FROM photo_submissions s
                JOIN photo_tasks t ON t.id = s.task_id
@@ -485,7 +485,7 @@ async def points_breakdown(user_id: int) -> dict:
         "messages": messages,
         "voices": voices,
         "message_points": msg_points,
-        "photohunt_days": by_source.get("photohunt_day", (0, 0))[1],
+        "photohunt_days": by_source.get("photohunt_day", (0, 0))[1],  # засчитанных фото ФотоХанта
         "photohunt_points": by_source.get("photohunt_day", (0, 0))[0],
         "adjust_points": by_source.get("manual", (0, 0))[0],
         "word_count": by_source.get("phase_word", (0, 0))[1],

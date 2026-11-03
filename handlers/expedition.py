@@ -56,6 +56,11 @@ def esc(text: str | None) -> str:
     return html.escape(text or "")
 
 
+def fmt(n) -> str:
+    """Баллы без лишних нулей: 27.0 → «27», 27.5 → «27.5»."""
+    return f"{float(n or 0):g}"
+
+
 # ---------------------------------------------------------------- состояние (с кэшем)
 
 class _State:
@@ -192,7 +197,7 @@ def format_board(rows, me: int | None = None) -> str:
     for place, user_id, name, total in rows[:EXP_TOP_SIZE]:
         mark = MEDALS.get(place, f"{place}.")
         name = f"<b>{esc(name)}</b>" if user_id == me else esc(name)
-        lines.append(f"{mark} {name} — {total}")
+        lines.append(f"{mark} {name} — {fmt(total)}")
     if me is not None:
         mine = next((r for r in rows if r[1] == me), None)
         lines.append("")
@@ -200,7 +205,7 @@ def format_board(rows, me: int | None = None) -> str:
             lines.append("Тебя пока нет в рейтинге — напиши что-нибудь в чат 🙂")
         elif mine[0] > EXP_TOP_SIZE:
             gap = rows[EXP_TOP_SIZE - 1][3] - mine[3] + 1
-            lines.append(f"Ты на <b>{mine[0]}</b> месте ({mine[3]} балл.). До топ-{EXP_TOP_SIZE}: {gap} балл.")
+            lines.append(f"Ты на <b>{mine[0]}</b> месте ({fmt(mine[3])} балл.). До топ-{EXP_TOP_SIZE}: {fmt(gap)} балл.")
     return "\n".join(lines)
 
 
@@ -252,19 +257,19 @@ async def points_text(user_id: int) -> str:
     place = next((r[0] for r in await ranking() if r[1] == user_id), None)
     b = await db.points_breakdown(user_id)
     lines = [
-        f"🧭 <b>Твоя Экспедиция: {total} балл.</b>",
+        f"🧭 <b>Твоя Экспедиция: {fmt(total)} балл.</b>",
         f"Место в рейтинге: <b>{place}</b>" if place else "В рейтинге тебя пока нет",
         "",
         f"💬 Сообщения: {b['messages']}",
         f"🎙 Голосовые и кружки: {b['voices']}",
-        f"📸 Дней в ФотоХанте: {b['photohunt_days']} (+{b['photohunt_points']})",
+        f"📸 Фото в ФотоХанте: {b['photohunt_days']} (+{fmt(b['photohunt_points'])})",
     ]
     if b["word_count"]:
         lines.append(f"✍️ Задания со словами: {b['word_count']} (+{b['word_points']})")
     if b["photo_count"]:
         lines.append(f"🖼 Фото-задания: {b['photo_count']} (+{b['photo_points']})")
     if b["adjust_points"]:
-        lines.append(f"🛠 Корректировка OC: {b['adjust_points']:+d}")
+        lines.append(f"🛠 Корректировка OC: {'+' if b['adjust_points'] > 0 else ''}{fmt(b['adjust_points'])}")
     return "\n".join(lines)
 
 
@@ -274,20 +279,9 @@ async def cmd_points(message: Message) -> None:
     if not await visible_to(user_id):
         return
     if message.chat.type in GROUPS:
-        from chatutil import GROUP_REPLY_SECONDS, delete_later
-        bot = message.bot
-        delete_later(bot, message.chat.id, [message.message_id], 0)  # команду убираем сразу
-        if await is_staff(user_id):
-            text = "OC баллы не получает 🙂 Рейтинг участников — /top"
-        else:
-            total = await db.get_points(user_id)
-            place = next((r[0] for r in await ranking() if r[1] == user_id), None)
-            text = f"⭐ {esc(message.from_user.first_name)}: <b>{total}</b> балл." + (f", {place} место" if place else "")
-        sent = await bot.send_message(
-            message.chat.id, text,
-            message_thread_id=message.message_thread_id if message.is_topic_message else None,
-        )
-        delete_later(bot, message.chat.id, [sent.message_id], GROUP_REPLY_SECONDS)
+        # /points работает только в личке: в чате просто убираем команду, без ответа
+        from chatutil import delete_later
+        delete_later(message.bot, message.chat.id, [message.message_id], 0)
         return
     if await is_staff(user_id):
         await message.answer(
@@ -430,7 +424,7 @@ def _amount(text: str) -> int | None:
 async def _apply_points(user_id: int, amount: int, by: int, name: str) -> str:
     await db.add_points(user_id, amount, "manual", by)
     total = await db.get_points(user_id)
-    return f"🛠 {amount:+d} для {esc(name)}. Теперь у него {total} балл."
+    return f"🛠 {amount:+d} для {esc(name)}. Теперь у него {fmt(total)} балл."
 
 
 @router.message(Command("addpoints"), F.chat.type.in_(GROUPS), IsAdmin())

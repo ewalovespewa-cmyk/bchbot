@@ -24,7 +24,8 @@ LOCAL_TZ = timezone(timedelta(hours=int(os.getenv("TZ_OFFSET_HOURS", "5"))))
 # ---- Экспедиция: сколько стоит каждое действие ----
 EXP_MESSAGE_POINTS = int(os.getenv("EXP_MESSAGE_POINTS", "1"))   # любое сообщение, стикер
 EXP_VOICE_POINTS = int(os.getenv("EXP_VOICE_POINTS", "3"))       # голосовое или кружок
-EXP_PHOTOHUNT_DAY_POINTS = int(os.getenv("EXP_PHOTOHUNT_DAY_POINTS", "5"))  # день с засчитанным фото
+EXP_PHOTOHUNT_DAY_POINTS = float(os.getenv("EXP_PHOTOHUNT_DAY_POINTS", "5"))     # фото прислано в день задания
+EXP_PHOTOHUNT_LATE_POINTS = float(os.getenv("EXP_PHOTOHUNT_LATE_POINTS", "2.5"))  # фото прислано позже (на след. день)
 # Антиспам: сообщения одного человека чаще, чем раз в N секунд, не считаются (0 — выключить)
 EXP_COOLDOWN_SECONDS = float(os.getenv("EXP_COOLDOWN_SECONDS", "2"))
 # Сколько мест в лидерборде и сколько из них с главными подарками

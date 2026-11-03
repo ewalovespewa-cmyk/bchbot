@@ -110,7 +110,7 @@ async def to_menu(message: Message, bot: Bot) -> None:
 
 async def sync_commands(bot: Bot) -> None:
     """Подсказки команд в Telegram (то, что всплывает при вводе «/»).
-    Личка: только /start (там всё на кнопках). Группы: /top, /points, /help — только пока
+    Личка: только /start (там всё на кнопках, «Мои баллы» тоже). Группы: /top, /help — только пока
     Экспедиция идёт; до старта и на паузе в группах подсказок нет — ничего не палим."""
     from aiogram.types import BotCommand, BotCommandScopeAllGroupChats, BotCommandScopeAllPrivateChats, BotCommandScopeDefault
 
@@ -123,7 +123,6 @@ async def sync_commands(bot: Bot) -> None:
             await bot.set_my_commands(
                 [
                     BotCommand(command="top", description="🏆 Лидерборд Экспедиции"),
-                    BotCommand(command="points", description="⭐ Мои баллы и место"),
                     BotCommand(command="help", description="Что умеет бот"),
                 ],
                 scope=BotCommandScopeAllGroupChats(),

@@ -19,7 +19,6 @@ GROUPS = {"group", "supergroup"}
 
 HELP_EXPEDITION = (
     "/top — лидерборд Экспедиции 🧭\n"
-    "/points — мои баллы и место\n"
 )
 HELP_STAFF = (
     "\n\n<b>📸 ФотоХант (для OC):</b>\n"
@@ -80,7 +79,7 @@ async def _group_help(message: Message, bot: Bot) -> None:
     text = await user_help()
     if not text:
         return
-    await ephemeral(message, bot, "🤖 <b>Команды бота</b>\n" + text + "\n\nОстальное — в личке у бота: /start", delay=GROUP_REPLY_SECONDS)
+    await ephemeral(message, bot, "🤖 <b>Команды бота</b>\n" + text + "\nСвои баллы и место — в личке у бота: /start → «⭐ Мои баллы»", delay=GROUP_REPLY_SECONDS)
 
 
 @router.message(Command("commands"), F.chat.type == "private")
