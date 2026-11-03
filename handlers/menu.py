@@ -204,7 +204,8 @@ async def scr_set() -> tuple[str, InlineKeyboardMarkup]:
         f"{mark(tracks)} <code>/track</code> — в теме «Флуд»: там считаются сообщения\n\n"
         "Бот должен быть <b>админом</b> в этих чатах — проверить: «🩺 Проверка»."
     )
-    rows = [[b("👥 Модераторы", "m:mods")], [b("🔄 Сбросить чаты", "m:rst")]]
+    rows = [[b("👥 Модераторы", "m:mods")], [b("🔄 Сбросить чаты", "m:rst")],
+            [b("🧹 Очистить тестовые данные", "m:wipeq")]]
     rows.append(back())
     return text, kb(*rows)
 
@@ -420,7 +421,7 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         return
 
     # --- только админ ---
-    admin_keys = {"exp", "bg", "revoff", "delmod", "rs"}
+    admin_keys = {"exp", "bg", "revoff", "delmod", "rs", "wipe"}
     if key in admin_keys and len(parts) > 2 and not admin:
         await callback.answer("Это может только админ.", show_alert=True)
         return
@@ -440,6 +441,43 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
         await db.set_setting("bingo_open", "1" if parts[2] == "on" else "0")
         await callback.answer("Приём бинго включён" if parts[2] == "on" else "Приём бинго выключен")
         await show(callback, "bg", bot)
+        return
+    if key == "wipeq" and admin:
+        await callback.message.edit_text(
+            "🧹 <b>Очистить тестовые данные?</b>\n\n"
+            "Удалится всё, что накопилось во время тестов:\n"
+            "• задания ФотоХанта и их хэштеги, присланные фото\n"
+            "• текстовые задания (слова) и ответы на них\n"
+            "• все баллы, сообщения, рейтинг\n"
+            "• сдачи бинго\n\n"
+            "Останутся: модераторы, настройки чатов, тексты заданий бинго.\n"
+            "<b>Отменить это нельзя.</b>",
+            reply_markup=kb([b("🧹 Да, очистить всё", "m:wipe:yes")], back("set", "✖️ Отмена")),
+        )
+        await callback.answer()
+        return
+    if key == "wipe" and len(parts) > 2:
+        deleted_posts = 0
+        for chat_id, message_id in await db.word_posts():
+            try:
+                await bot.delete_message(chat_id, message_id)
+                deleted_posts += 1
+            except Exception:
+                pass
+        stats = await db.wipe_game_data()
+        expedition.reset_cache()
+        total = sum(stats.values())
+        await callback.message.edit_text(
+            "✅ <b>Тестовые данные удалены.</b>\n\n"
+            f"Заданий ФотоХанта: {stats['photo_tasks']} · фото: {stats['photo_submissions']}\n"
+            f"Слов: {stats['exp_word_tasks']} · ответов: {stats['exp_word_done']}\n"
+            f"Записей баллов: {stats['points_log'] + stats['exp_messages']}\n"
+            f"Сдач бинго: {stats['bingo_items']}\n"
+            + (f"Постов со словами удалено из чата: {deleted_posts}\n" if deleted_posts else "")
+            + "\nРейтинг пуст, хэштеги свободны — можно запускать.",
+            reply_markup=kb(back("set")),
+        )
+        await callback.answer("Очищено" if total else "Нечего было чистить")
         return
     if key == "rs":  # сброс привязки чатов
         what = parts[2]

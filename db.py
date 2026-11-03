@@ -568,3 +568,36 @@ async def set_task_active_by_id(task_id: int, active: bool):
         await db.execute("UPDATE photo_tasks SET active=? WHERE id=?", (int(active), task_id))
         await db.commit()
         return row[0]
+
+
+GAME_TABLES = (
+    # ФотоХант
+    "photo_tasks", "photo_submissions", "review_messages", "exp_photohunt_days",
+    # Экспедиция: сообщения, текстовые задания, (старые) фото-задания, журнал баллов
+    "exp_messages", "exp_word_tasks", "exp_word_done",
+    "exp_photo_tasks", "exp_photo_subs", "exp_photo_review_msgs", "points_log",
+    # Бинго
+    "bingo_items", "bingo_item_msgs", "bingo_done", "bingo_subs", "bingo_photos", "bingo_review_msgs",
+)
+
+
+async def word_posts():
+    async with _connect() as db:
+        cur = await db.execute(
+            "SELECT post_chat_id, post_message_id FROM exp_word_tasks WHERE post_message_id IS NOT NULL"
+        )
+        return await cur.fetchall()
+
+
+async def wipe_game_data() -> dict[str, int]:
+    """Удаляет все игровые данные (задания, хэштеги, слова, фото, баллы, рейтинг, бинго).
+    Не трогает: пользователей, модераторов, настройки чатов, тексты заданий бинго.
+    Счётчики id не сбрасываются — старые кнопки проверки не сработают на новых заданиях."""
+    out = {}
+    async with _connect() as db:
+        for table in GAME_TABLES:
+            cur = await db.execute(f"DELETE FROM {table}")
+            out[table] = cur.rowcount
+        await db.execute("DELETE FROM settings WHERE key LIKE 'board_msg_%'")
+        await db.commit()
+    return out
