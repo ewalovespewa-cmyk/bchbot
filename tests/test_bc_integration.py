@@ -131,3 +131,28 @@ async def test_bingo_filter_requires_checkin_today(env, monkeypatch):
     assert "Бинго пока недоступно" in msg.answer.await_args.args[0]
     await access.save(5, True, [access.today()], "event")
     assert await gate.IsCheckedIn()(_message(5)) is True
+
+
+async def test_bingo_open_for_any_event_day(env, monkeypatch):
+    access, _, gate = env
+    from integration import config as icfg
+
+    monkeypatch.setattr(gate, "is_staff", AsyncMock(return_value=False))
+    monkeypatch.setattr(icfg, "BC_CHECKIN_DAYS", ["2026-11-14", "2026-11-15"])
+    await access.save(7, True, ["2026-11-10"], "event")  # тестовый день до проекта не считается
+    assert await access.is_checked_in(7) is False
+    await access.save(7, True, ["2026-11-14"], "event")  # отметился в первый день — бинго и во второй
+    assert await access.is_checked_in(7) is True
+    assert await gate.IsCheckedIn()(_message(7)) is True
+
+
+async def test_gate_all_off_leaves_other_games_open(env, monkeypatch):
+    import integration
+    from integration import config as icfg
+
+    monkeypatch.setattr(icfg, "BC_GATE_ALL", False)
+    monkeypatch.setattr(integration.events, "start_server", AsyncMock(return_value="runner"))
+    dp = MagicMock()
+    assert await integration.setup_integration(dp) == "runner"
+    dp.message.outer_middleware.assert_not_called()
+    dp.callback_query.outer_middleware.assert_not_called()

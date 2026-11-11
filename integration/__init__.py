@@ -35,11 +35,13 @@ async def setup_integration(dp: Dispatcher):
         log.info("Интеграция с ботом регистрации выключена (BC_API_URL не задан)")
         return None
     await access.init()
-    gate = AccessGate()
-    dp.message.outer_middleware(gate)
-    dp.callback_query.outer_middleware(gate)
+    if config.BC_GATE_ALL:
+        gate = AccessGate()
+        dp.message.outer_middleware(gate)
+        dp.callback_query.outer_middleware(gate)
     if config.BC_AUTO_APPROVE_JOIN:
         dp.include_router(_join_router())
     runner = await events.start_server()
-    log.info("Интеграция с ботом регистрации включена: %s", config.BC_API_URL)
+    scope = "все игры для активировавших" if config.BC_GATE_ALL else "только бинго, по чекину"
+    log.info("Интеграция с ботом регистрации включена (%s): %s", scope, config.BC_API_URL)
     return runner

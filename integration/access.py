@@ -111,5 +111,10 @@ async def is_activated(user_id: int) -> bool | None:
 
 
 async def is_checked_in(user_id: int, day: str | None = None) -> bool:
+    """Отметился ли на входе: в указанный день, в любой из BC_CHECKIN_DAYS или сегодня."""
     result = await status(user_id)
-    return bool(result and result[0] and (day or today()) in result[1])
+    if not (result and result[0]):
+        return False
+    if day is None and config.BC_CHECKIN_DAYS:
+        return any(d in result[1] for d in config.BC_CHECKIN_DAYS)
+    return (day or today()) in result[1]
