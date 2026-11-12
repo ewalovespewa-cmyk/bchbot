@@ -345,7 +345,7 @@ async def on_input(message: Message, state: FSMContext, bot: Bot) -> None:
         await admin_cmds.cmd_addmod(message, co("addmod", who))
     elif action.startswith("bgt:"):
         n = int(action.split(":")[1])
-        await bingo.set_task_text(n, text)
+        await bingo.set_task_text(n, text, message.html_text)  # ссылки и жирный не теряются
         await message.answer(f"✅ Текст задания {n} сохранён." if text.strip() not in {"", "-"}
                              else f"↩️ Для задания {n} вернул стандартный текст.")
     await show(message, back_to, bot)
@@ -395,10 +395,11 @@ async def on_menu(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
             return
         if action == "bgt":
             n = int(parts[3])
-            current = await bingo.task_text(n)
+            current = await bingo.task_html(n)
             prompt = (
-                f"✏️ <b>{esc(bingo.title(n))}</b>\n\nСейчас:\n<i>{esc(current)}</i>\n\n"
+                f"✏️ <b>{esc(bingo.title(n))}</b>\n\nСейчас:\n{current}\n\n"
                 "Пришли новый текст задания (описание и строку «Подтверждение: …»). "
+                "Жирный, курсив и ссылки, спрятанные в слово, сохранятся. "
                 "Название останется прежним. Отправь «-», чтобы вернуть стандартный текст."
             )
             await ask(callback, state, f"bgt:{n}", prompt, "bgt")

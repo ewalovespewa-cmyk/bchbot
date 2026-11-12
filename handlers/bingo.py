@@ -150,11 +150,14 @@ async def task_text(cell: int) -> str:
     return await custom_text(cell) or default_text(cell)
 
 
+HTML_MARK = "html:"  # текст из редактора сохранён с форматированием и ссылками
+
+
 async def task_html(cell: int) -> str:
-    """Описание задания для карточки (HTML): своё от OC — как есть, стандартное — со ссылкой из LINKS."""
+    """Описание задания для карточки (HTML): своё от OC — с его форматированием, стандартное — со ссылкой из LINKS."""
     custom = await custom_text(cell)
     if custom:
-        return esc(custom)
+        return custom[len(HTML_MARK):] if custom.startswith(HTML_MARK) else esc(custom)
     _, body, proof = TASKS[cell]
     body = esc(body)
     if cell in LINKS:
@@ -163,10 +166,16 @@ async def task_html(cell: int) -> str:
     return f"{body}\n\n<b>Подтверждение:</b> {esc(proof)}"
 
 
-async def set_task_text(cell: int, text: str) -> None:
-    """«-» — вернуть стандартный текст."""
+async def set_task_text(cell: int, text: str, html_text: str | None = None) -> None:
+    """«-» — вернуть стандартный текст. html_text — тот же текст с форматированием и ссылками из Telegram."""
     text = text.strip()
-    await db.set_setting(f"bingo_v2_task_{cell}", None if text in {"", "-"} else text)
+    if text in {"", "-"}:
+        value = None
+    elif html_text:
+        value = HTML_MARK + html_text.strip()
+    else:
+        value = text
+    await db.set_setting(f"bingo_v2_task_{cell}", value)
 
 
 async def available_for(user_id: int) -> bool:

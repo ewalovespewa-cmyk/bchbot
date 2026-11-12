@@ -44,3 +44,23 @@ async def test_task_14_has_aiesec_link(monkeypatch):
     assert "<b>Подтверждение:</b>" in html_text
     monkeypatch.setattr(bingo, "custom_text", AsyncMock(return_value="свой <текст>"))
     assert await bingo.task_html(14) == "свой &lt;текст&gt;"  # текст от OC экранируется как раньше
+
+
+async def test_editor_keeps_links(monkeypatch):
+    from handlers import bingo
+
+    store = {}
+
+    async def set_setting(key, value):
+        store[key] = value
+
+    async def get_setting(key):
+        return store.get(key)
+
+    monkeypatch.setattr(bingo.db, "set_setting", set_setting)
+    monkeypatch.setattr(bingo.db, "get_setting", get_setting)
+    html_text = 'Зарегистрируйся на <a href="https://aieseckz.vercel.app/r/bc2-tg-bot14">aiesec.org</a>'
+    await bingo.set_task_text(14, "Зарегистрируйся на aiesec.org", html_text)
+    assert await bingo.task_html(14) == html_text  # ссылка за словом не потерялась
+    await bingo.set_task_text(14, "-", "-")
+    assert "bc2-tg-bot14" in await bingo.task_html(14)  # «-» вернул стандартный текст со ссылкой
