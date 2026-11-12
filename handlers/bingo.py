@@ -24,7 +24,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
 
 import db
 import db_bingo
@@ -81,6 +81,10 @@ TASKS = {
     14: ("AIESEC.ORG REGISTRATION",
          "Зарегистрируйся на aiesec.org и стань на шаг ближе к международному сообществу AIESEC.",
          "скриншот регистрации или личного кабинета."),
+}
+# Ссылки в стандартных текстах заданий: слово из описания становится кликабельным.
+LINKS = {
+    14: ("aiesec.org", "https://aieseckz.vercel.app/r/bc2-tg-bot14"),
 }
 CELLS = len(TASKS)
 TEXT_CELLS = {8, 10}   # только текст
@@ -144,6 +148,19 @@ async def custom_text(cell: int) -> str | None:
 async def task_text(cell: int) -> str:
     """Описание задания (без названия): своё от OC или стандартное."""
     return await custom_text(cell) or default_text(cell)
+
+
+async def task_html(cell: int) -> str:
+    """Описание задания для карточки (HTML): своё от OC — как есть, стандартное — со ссылкой из LINKS."""
+    custom = await custom_text(cell)
+    if custom:
+        return esc(custom)
+    _, body, proof = TASKS[cell]
+    body = esc(body)
+    if cell in LINKS:
+        word, url = LINKS[cell]
+        body = body.replace(esc(word), f'<a href="{esc(url)}"><b>{esc(word)}</b></a>', 1)
+    return f"{body}\n\n<b>Подтверждение:</b> {esc(proof)}"
 
 
 async def set_task_text(cell: int, text: str) -> None:
@@ -259,7 +276,7 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
         await state.set_state(BingoInput.waiting)
         await state.update_data(cell=cell)
         kind = kind_of(cell)
-        task_part = f"\n\n📝 <b>{esc(title(cell))}</b>\n{esc(await task_text(cell))}\n\n"
+        task_part = f"\n\n📝 <b>{esc(title(cell))}</b>\n{await task_html(cell)}\n\n"
         if kind == "text":
             body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
                     "Отправь ответ одним текстовым сообщением.\n\nЖду твой ответ!")
@@ -276,6 +293,7 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.message.edit_text(
             f"{body}{again}",
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[b("✖️ Отмена", "bgo:grid")]]),
+            link_preview_options=LinkPreviewOptions(is_disabled=True),  # без превью сайта под заданием
         )
         await callback.answer()
         return

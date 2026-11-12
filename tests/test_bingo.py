@@ -31,3 +31,16 @@ def test_kinds():
     kinds = [kind_of(n) for n in range(1, 15)]
     assert kinds[7] == kinds[9] == "text" and kinds[8] == "both"
     assert kinds.count("photo") == 11
+
+
+async def test_task_14_has_aiesec_link(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from handlers import bingo
+
+    monkeypatch.setattr(bingo, "custom_text", AsyncMock(return_value=None))
+    html_text = await bingo.task_html(14)
+    assert '<a href="https://aieseckz.vercel.app/r/bc2-tg-bot14"><b>aiesec.org</b></a>' in html_text
+    assert "<b>Подтверждение:</b>" in html_text
+    monkeypatch.setattr(bingo, "custom_text", AsyncMock(return_value="свой <текст>"))
+    assert await bingo.task_html(14) == "свой &lt;текст&gt;"  # текст от OC экранируется как раньше
