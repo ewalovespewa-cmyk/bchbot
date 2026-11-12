@@ -17,7 +17,7 @@ async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     await db.init_db()
 
-    bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True)  # без превью ссылок)
+    bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML, link_preview_is_disabled=True))  # без превью ссылок
     dp = Dispatcher()
     dp.include_routers(*get_routers())
     # Доступ только для активировавших бота регистрации + приём событий от него (выключено без BC_API_URL).
