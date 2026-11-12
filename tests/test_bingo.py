@@ -64,3 +64,10 @@ async def test_editor_keeps_links(monkeypatch):
     assert await bingo.task_html(14) == html_text  # ссылка за словом не потерялась
     await bingo.set_task_text(14, "-", "-")
     assert "bc2-tg-bot14" in await bingo.task_html(14)  # «-» вернул стандартный текст со ссылкой
+
+
+def test_title_has_no_autolink():
+    from handlers.bingo import title
+
+    assert title(14) == "14. AIESEC.​ORG REGISTRATION"  # Telegram не сделает из названия ссылку
+    assert title(1) == "01. LINKED IN"

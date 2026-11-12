@@ -115,7 +115,8 @@ KIND_ICON = {"text": "✍️", "photo": "📸", "both": "📸✍️"}
 
 def title(cell: int) -> str:
     """«01. LINKED IN»"""
-    return f"{cell:02d}. {TASKS[cell][0]}"
+    # Невидимый пробел после точки: иначе Telegram сам делает из «AIESEC.ORG» ссылку на aiesec.org (без трекинга).
+    return f"{cell:02d}. {TASKS[cell][0]}".replace(".", ".​").replace(f"{cell:02d}.​", f"{cell:02d}.", 1)
 
 
 def cell_rows(prefix: str, label=lambda n: str(n)) -> list[list[InlineKeyboardButton]]:
