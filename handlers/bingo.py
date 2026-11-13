@@ -1,4 +1,4 @@
-"""Бинго — офлайн-игра: 14 заданий (08, 10 — текст; 09 — фото + короткий ответ; остальные — фото/скриншот),
+"""Бинго — офлайн-игра: 12 заданий (07, 09 — текст; 08 — фото + короткий ответ; остальные — фото/скриншоты),
 каждое сдаётся и проверяется отдельно.
 
 Секретность: пока приём выключен, бинго нигде не видно — ни кнопок, ни команд, бот молчит на фото.
@@ -16,7 +16,10 @@ OC: каждое задание приходит отдельным сообще
 Если подключён бот регистрации — бинго доступно только отметившимся на входе сегодня.
 Баллы в Экспедицию за бинго: BINGO_POINTS (по умолчанию 0 — не начисляются).
 """
+import asyncio
 import html
+import json
+import re
 import logging
 import os
 
@@ -24,7 +27,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
+from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, InputMediaPhoto, LinkPreviewOptions, Message
 
 import db
 import db_bingo
@@ -39,56 +42,59 @@ log = logging.getLogger(__name__)
 
 # Задания: (название, описание, подтверждение). Тексты можно поправить в меню → Бинго → ✏️ Тексты заданий.
 TASKS = {
-    1: ("LINKED IN",
-        "Опубликуй пост в LinkedIn о своём опыте участия в Business Cup и отметь “AIESEC in Kazakhstan” и “Zimran”.",
-        "скриншот опубликованного поста."),
+    1: ("AIESEC.ORG REGISTRATION",
+        "Зарегистрируйся на aiesec.org и стань на шаг ближе к международному сообществу AIESEC.",
+        "скриншот регистрации или личного кабинета."),
     2: ("TEAM CHECK",
-        "Сделай фото своей команды у баннера Business Cup.",
+        "Сделай фото своей команды у баннера Business Cup с смешными позами.",
         "фото команды."),
     3: ("NEW CONNECTION",
         "Познакомьтесь с другой командой и сделайте совместное селфи полными составами обеих команд.",
         "совместное фото."),
-    4: ("JUST POSE",
-        "Сделай с командой фото с смешными позами.",
-        "фото команды."),
-    5: ("HYDRATION CHECK",
+    4: ("HYDRATION CHECK",
         "Напомни тиммейту попить воды и сделайте фото со своими бутылками или стаканами.",
         "фото с водой."),
-    6: ("PROJECT RUN MODE",
+    5: ("PROJECT RUN MODE",
         "Покажи, как выглядит рабочее место твоей команды во время Project Run.",
         "фото рабочего места."),
-    7: ("BC ON YOU",
+    6: ("BC ON YOU",
         "Покажи свой мерч Business Cup - например, браслет на руке. Можно всей командой!",
         "фото с мерчем."),
-    8: ("DELULU IS THE SOLULU",
+    7: ("DELULU IS THE SOLULU",
         "Придумай самое амбициозное название или слоган для своего продукта. Чем смелее, тем лучше.",
         "текст."),
-    9: ("MEET AIESEC",
+    8: ("MEET AIESEC",
         "Познакомься с одним AIESEC-ером, сделай совместное фото и узнай, что ему дал AIESEC. Поделись ответом.",
         "фото и короткий ответ."),
-    10: ("HELP US COOK",
-         "Предложи одну идею, которая сделает будущий Business Cup ещё интереснее.",
-         "текст."),
-    11: ("SHOUT-OUT",
-         "Поделись одним впечатлением от  Business Cup 2.0 в Instagram Stories и отметь @aieseckz и @zimran.team",
-         "скриншот сторис."),
-    12: ("TAP FOLLOW",
-         "Подпишись на Instagram одного из наших партнёров.",
+    9: ("HELP US COOK",
+        "Предложи одну идею, которая сделает будущий Business Cup ещё интереснее.",
+        "текст."),
+    10: ("TAP FOLLOW",
+         "Подпишись на Instagram одного из наших партнёров:\n"
+         "firedrift.astana\naki._.time\nflip.kz\nkangojump_astana\nyescolor.astana\nclimbersgardenkz\nrpk.kz_",
          "скриншот подписки."),
-    13: ("CHEAT MEAL",
-         "Отметь в Instagram Stories продукцию партнеров  на кофе брейке.",
+    11: ("CHEAT MEAL",
+         "Сделай фото своего Coffee Break, выложи в Instagram Stories и отметь aieseckz , а также аккаунт партнёра, "
+         "чью продукцию ты попробовал(а)!\nНаши Coffee Break partners:\n"
+         "nummi_kz\nkhalyq.sandwich01\npro_natige\ntalionigiri.kz\ndikiilori\nrccola_kaz\nglife_water\nlibellabottlers",
+         "скриншот сторис."),
+    12: ("SECRET STICKER",
+         "Незаметно приклей стикер на другого делегата, не привлекая его внимания.",
          "фото."),
-    14: ("AIESEC.ORG REGISTRATION",
-         "Зарегистрируйся на aiesec.org и стань на шаг ближе к международному сообществу AIESEC.",
-         "скриншот регистрации или личного кабинета."),
 }
 # Ссылки в стандартных текстах заданий: слово из описания становится кликабельным.
 LINKS = {
-    14: ("aiesec.org", "https://aieseckz.vercel.app/r/bc2-tg-bot14"),
+    1: ("aiesec.org", "https://aieseckz.vercel.app/r/bc2-tg-bot14"),
 }
+# Строки-аккаунты Instagram в стандартных текстах: становятся ссылками на профиль
+# (иначе Telegram сам делает из «flip.kz» ссылку на сайт).
+IG_LINE = re.compile(r"^[A-Za-z0-9._]+$")
+IG_CELLS = {10, 11}
 CELLS = len(TASKS)
-TEXT_CELLS = {8, 10}   # только текст
-BOTH_CELLS = {9}       # фото + короткий ответ в подписи; остальные — фото / скриншот
+TEXT_CELLS = {7, 9}    # только текст
+BOTH_CELLS = {8}       # фото + короткий ответ в подписи; остальные — фото / скриншот
+MIN_PHOTOS: dict[int, int] = {}  # минимум фото/скринов по заданию (по умолчанию 1)
+MAX_PHOTOS = 10        # альбом в Telegram — до 10
 ROW = 4                # номеров в ряду карточки
 BINGO_POINTS = int(os.getenv("BINGO_POINTS", "0"))
 ICON = {None: "⬜", "pending": "⏳", "approved": "✅", "rejected": "❌"}
@@ -143,7 +149,7 @@ def default_text(cell: int) -> str:
 
 async def custom_text(cell: int) -> str | None:
     """Текст, который OC поменяли в меню. None — используется стандартный."""
-    return await db.get_setting(f"bingo_v2_task_{cell}")
+    return await db.get_setting(f"bingo_v3_task_{cell}")
 
 
 async def task_text(cell: int) -> str:
@@ -164,6 +170,11 @@ async def task_html(cell: int) -> str:
     if cell in LINKS:
         word, url = LINKS[cell]
         body = body.replace(esc(word), f'<a href="{esc(url)}"><b>{esc(word)}</b></a>', 1)
+    if cell in IG_CELLS:
+        body = "\n".join(
+            f'<a href="https://instagram.com/{line}">{line}</a>' if IG_LINE.match(line) else line
+            for line in body.split("\n")
+        )
     return f"{body}\n\n<b>Подтверждение:</b> {esc(proof)}"
 
 
@@ -176,7 +187,7 @@ async def set_task_text(cell: int, text: str, html_text: str | None = None) -> N
         value = HTML_MARK + html_text.strip()
     else:
         value = text
-    await db.set_setting(f"bingo_v2_task_{cell}", value)
+    await db.set_setting(f"bingo_v3_task_{cell}", value)
 
 
 async def available_for(user_id: int) -> bool:
@@ -228,7 +239,7 @@ async def status_text() -> str:
         f"Ждут проверки: {s['pending']}\n"
         f"Засчитано заданий: {s['approved']} · на переделку: {s['rejected']}\n"
         f"Участвуют: {s['people']} · собрали всё бинго: {s['done']}\n\n"
-        f"Заданий: {CELLS}. 08 и 10 — текст, 09 — фото + ответ, остальные — фото/скриншот. "
+        f"Заданий: {CELLS}. 07 и 09 — текст, 08 — фото + ответ, остальные — фото/скрины (можно несколько). "
         "Каждое приходит на проверку отдельно."
     )
 
@@ -292,11 +303,13 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
                     "Отправь ответ одним текстовым сообщением.\n\nЖду твой ответ!")
         elif kind == "both":
             body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
-                    "Отправь фотографию и напиши короткий ответ в подписи к ней — одним сообщением.\n\n"
+                    "Отправь фотографию и напиши короткий ответ в подписи к ней — одним сообщением. "
+                    "Можно несколько фото сразу (альбомом).\n\n"
                     "Очень интересно посмотреть, что ты подготовил!")
         else:
             body = (f"<b>Задание {cell} · {KIND_LABEL[kind]}</b>{task_part}"
-                    "Отправь фотографию, подтверждающую выполнение задания.\n\n"
+                    "Отправь фотографию, подтверждающую выполнение задания. "
+                    "Можно несколько фото или скринов сразу — одним сообщением (альбомом).\n\n"
                     "Очень интересно посмотреть, что ты подготовил!")
         again = ("\n\n<i>Предыдущая отправка задания не была принята. "
                  "Ознакомься с результатом проверки и отправь новый ответ.</i>") if status == "rejected" else ""
@@ -308,6 +321,18 @@ async def on_card(callback: CallbackQuery, state: FSMContext) -> None:
         await callback.answer()
         return
     await callback.answer()
+
+
+ALBUM_WAIT = 1.5  # сек: ждём остальные фото альбома (или присланные по одному подряд)
+_albums: dict[int, dict] = {}
+
+
+def pack(photos: list[str], text: str | None = None) -> str:
+    return json.dumps({"photos": photos, "text": text}, ensure_ascii=False)
+
+
+def min_photos(cell: int) -> int:
+    return MIN_PHOTOS.get(cell, 1)
 
 
 @router.message(StateFilter(BingoInput.waiting), F.chat.type == "private", ~F.text.startswith("/"))
@@ -322,21 +347,52 @@ async def on_answer(message: Message, state: FSMContext, bot: Bot) -> None:
         if not message.text:
             await message.answer(f"Задание {cell} · Текст ✍️\nОтправь ответ одним текстовым сообщением")
             return
-        content = message.text.strip()
-    elif kind == "both":
-        if not message.photo:
+        await _submit(message, state, bot, cell, kind, message.text.strip())
+        return
+    if not message.photo:
+        if kind == "both":
             await message.answer(f"Задание {cell} · Фото + ответ 📸✍️\nОтправь фотографию (не файлом) и напиши короткий ответ в подписи к ней.")
-            return
-        if not (message.caption or "").strip():
-            await message.answer(f"Задание {cell} · Фото + ответ 📸✍️\nФото есть, но не хватает ответа. Отправь фото ещё раз и напиши короткий ответ в подписи к нему.")
-            return
-        content = message.photo[-1].file_id + "\n" + message.caption.strip()
-    else:
-        if not message.photo:
+        else:
             await message.answer(f"Задание {cell} · Фото 📸\nОтправь фотографию для подтверждения задания. Не отправляй её файлом.")
-            return
-        content = message.photo[-1].file_id
+        return
+    # Фото копим: альбом приходит отдельными сообщениями, а кто-то шлёт скрины по одному подряд.
+    entry = _albums.get(user.id)
+    if entry is None or entry["cell"] != cell:
+        entry = _albums[user.id] = {"cell": cell, "photos": [], "caption": ""}
+    entry["photos"].append(message.photo[-1].file_id)
+    if (message.caption or "").strip():
+        entry["caption"] = (entry["caption"] + "\n" + message.caption.strip()).strip()
+    entry["last"] = message
+    if entry.get("timer"):
+        entry["timer"].cancel()
+    entry["timer"] = asyncio.create_task(_finish_album(user.id, state, bot))
 
+
+async def _finish_album(user_id: int, state: FSMContext, bot: Bot) -> None:
+    try:
+        await asyncio.sleep(ALBUM_WAIT)
+    except asyncio.CancelledError:
+        return
+    entry = _albums.pop(user_id, None)
+    if not entry:
+        return
+    cell, photos, caption, message = entry["cell"], entry["photos"], entry["caption"], entry["last"]
+    kind = kind_of(cell)
+    need = min_photos(cell)
+    if len(photos) < need:
+        await message.answer(
+            f"Задание {cell} · Фото 📸\nДля этого задания нужно минимум {need} фото/скрин(а), а пришло {len(photos)}. "
+            "Отправь все заново одним сообщением (альбомом)."
+        )
+        return
+    if kind == "both" and not caption:
+        await message.answer(f"Задание {cell} · Фото + ответ 📸✍️\nФото есть, но не хватает ответа. Отправь фото ещё раз и напиши короткий ответ в подписи к нему.")
+        return
+    await _submit(message, state, bot, cell, kind, pack(photos[:MAX_PHOTOS], caption if kind == "both" else None))
+
+
+async def _submit(message: Message, state: FSMContext, bot: Bot, cell: int, kind: str, content: str) -> None:
+    user = message.from_user
     await state.clear()
     await db.save_user(user.id, user.username, user.full_name)
     item_id = await db_bingo.submit(user.id, cell, kind, content)
@@ -372,23 +428,29 @@ def _who(item) -> str:
     return who
 
 
-def _photo_and_answer(item) -> tuple[str | None, str | None]:
+def _photos_and_answer(item) -> tuple[list[str], str | None]:
     """(file_id фото, текст ответа) для любой сдачи."""
     if item["kind"] == "text":
-        return None, item["content"]
-    if item["kind"] == "both":
-        file_id, _, answer = item["content"].partition("\n")
-        return file_id, answer
-    return item["content"], None
+        return [], item["content"]
+    content = item["content"]
+    if content.startswith("{"):
+        data = json.loads(content)
+        return data.get("photos") or [], data.get("text")
+    if item["kind"] == "both":  # старый формат: file_id\nответ
+        file_id, _, answer = content.partition("\n")
+        return [file_id], answer
+    return [content], None
 
 
-def _header(item) -> str:
+def _header(item, caption: bool = False) -> str:
     cell = item["cell"]
+    photos, answer = _photos_and_answer(item)
     head = (f"🎲 <b>Бинго · {esc(title(cell)) if cell in TASKS else cell}</b> "
             f"({KIND_SHORT.get(item['kind'], item['kind'])})\nОт: {_who(item)}")
-    _, answer = _photo_and_answer(item)
+    if len(photos) > 1:
+        head += f"\n📎 Фото: {len(photos)} шт. (выше)"
     if answer:
-        if item["kind"] == "both" and len(answer) > 600:  # подпись к фото ограничена 1024 символами
+        if caption and len(answer) > 600:  # подпись к фото ограничена 1024 символами
             answer = answer[:600] + "…"
         head += f"\n\n«{esc(answer)}»"
     return head
@@ -403,17 +465,20 @@ def _review_kb(item_id: int) -> InlineKeyboardMarkup:
 
 async def send_to_review(bot: Bot, item_id: int) -> None:
     item = await db_bingo.get(item_id)
-    text, kb = _header(item), _review_kb(item_id)
-    photo, _ = _photo_and_answer(item)
+    photos, _ = _photos_and_answer(item)
+    single = len(photos) == 1
+    text, kb = _header(item, caption=single), _review_kb(item_id)
     if await is_staff(item["user_id"]):
         text = "🧪 <i>тест OC</i>\n" + text
     for target in await review_targets():
         try:
-            if photo:
-                sent = await bot.send_photo(target, photo, caption=text, reply_markup=kb)
+            if single:
+                sent = await bot.send_photo(target, photos[0], caption=text, reply_markup=kb)
             else:
+                if photos:  # альбом, а под ним — сообщение с кнопками (к альбому кнопки не прикрепить)
+                    await bot.send_media_group(target, [InputMediaPhoto(media=f) for f in photos])
                 sent = await bot.send_message(target, text, reply_markup=kb)
-            await db_bingo.add_msg(item_id, target, sent.message_id, bool(photo))
+            await db_bingo.add_msg(item_id, target, sent.message_id, single)
         except Exception:
             log.warning("Бинго %s не доставлено на проверку в %s (нет /start или бот не в чате?)", item_id, target)
 
@@ -433,7 +498,7 @@ async def on_review(callback: CallbackQuery, bot: Bot) -> None:
         return
     item = await db_bingo.get(item_id)
     who = esc(callback.from_user.full_name)
-    text = _header(item) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
+    text = _header(item, caption=len(_photos_and_answer(item)[0]) == 1) + "\n\n" + (f"✅ Засчитал(а): {who}" if approved else f"❌ Не засчитал(а): {who}")
     for chat_id, message_id, is_photo in await db_bingo.msgs(item_id):
         try:
             if is_photo:
