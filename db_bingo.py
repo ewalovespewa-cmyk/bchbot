@@ -95,3 +95,28 @@ async def stats() -> dict:
         done = (await cur.fetchone())[0]
     return {"pending": by.get("pending", 0), "approved": by.get("approved", 0),
             "rejected": by.get("rejected", 0), "people": people, "done": done}
+
+
+async def ranking(exclude: list[int] | None = None) -> list[dict]:
+    """Рейтинг бинго: больше засчитанных заданий — выше; при равенстве выше тот,
+    кто раньше ОТПРАВИЛ последнее из засчитанных (время сдачи, а не проверки — чтобы скорость OC не влияла).
+    Повторная сдача после ❌ считается по времени новой сдачи."""
+    exclude = exclude or []
+    marks = ",".join("?" * len(exclude))
+    skip = f"AND i.user_id NOT IN ({marks})" if exclude else ""
+    async with _connect() as db:
+        db.row_factory = aiosqlite.Row
+        cur = await db.execute(
+            f"""
+            SELECT i.user_id, u.username, u.full_name,
+                   COUNT(DISTINCT CASE WHEN i.status='approved' THEN i.cell END) AS done,
+                   MAX(CASE WHEN i.status='approved' THEN i.created_at END)       AS reached_at,
+                   COUNT(DISTINCT CASE WHEN i.status='pending' THEN i.cell END)  AS pending
+            FROM bingo_items i LEFT JOIN users u ON u.user_id = i.user_id
+            WHERE 1=1 {skip}
+            GROUP BY i.user_id
+            ORDER BY done DESC, reached_at IS NULL, reached_at ASC, MIN(i.id) ASC
+            """,
+            exclude,
+        )
+        return [dict(r) for r in await cur.fetchall()]

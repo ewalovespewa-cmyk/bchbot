@@ -35,7 +35,7 @@ from integration import access as bc_access
 from integration import config as bc_config
 from integration.gate import NEED_CHECKIN_TEXT
 from config import BINGO_ENABLED
-from roles import IsAdmin, IsStaff, is_staff, review_targets
+from roles import IsAdmin, IsStaff, is_staff, review_targets, staff_ids
 
 router = Router()
 log = logging.getLogger(__name__)
@@ -544,3 +544,61 @@ async def _notify(bot: Bot, user_id: int, text: str, redo: int | None = None) ->
         await bot.send_message(user_id, text, reply_markup=markup)
     except Exception:
         log.warning("Не смог написать делегату %s про бинго", user_id)
+
+
+# ---------------------------------------------------------------- рейтинг (для OC)
+
+WINNERS = 10  # призовых мест
+
+
+def _local_time(ts: str | None) -> str:
+    """'2026-11-14 07:42:10' (UTC в базе) → '14.11 12:42' по местному времени."""
+    if not ts:
+        return ""
+    from datetime import datetime, timezone
+    from config import LOCAL_TZ
+    dt = datetime.strptime(ts[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc).astimezone(LOCAL_TZ)
+    return dt.strftime("%d.%m %H:%M:%S")
+
+
+async def ranking_text(limit: int = 40) -> str:
+    from datetime import datetime
+    from config import LOCAL_TZ
+    rows = await db_bingo.ranking(exclude=await staff_ids())
+    now = datetime.now(LOCAL_TZ).strftime("%H:%M:%S")
+    lines = ["🏆 <b>Рейтинг бинго</b>", ""]
+    if not rows:
+        lines.append("Пока никто ничего не сдал.")
+    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
+    for place, r in enumerate(rows[:limit], 1):
+        if place == WINNERS + 1:
+            lines.append("— — — призовые места выше — — —")
+        who = esc(r["full_name"]) or str(r["user_id"])
+        if r["username"]:
+            who += f" (@{esc(r['username'])})"
+        line = f"{medals.get(place, f'{place}.')} {who} — <b>{r['done']}/{CELLS}</b>"
+        if r["reached_at"]:
+            line += f" · {_local_time(r['reached_at'])}"
+        if r["pending"]:
+            line += f" · ⏳ {r['pending']} на проверке"
+        lines.append(line)
+    if len(rows) > limit:
+        lines.append(f"…и ещё {len(rows) - limit}")
+    waiting = sum(1 for r in rows if r["pending"])
+    lines += [
+        "",
+        f"Порядок: больше принятых заданий → выше. При равенстве выше тот, кто <b>раньше отправил</b> "
+        f"последнее из принятых заданий (время — когда делегат сдал, а не когда OC проверил).",
+        f"Первые {WINNERS} — победители. OC в рейтинг не попадают.",
+    ]
+    if waiting:
+        lines.append(f"⚠️ У {waiting} чел. есть задания на проверке — проверь их до подведения итогов, "
+                     "иначе места могут поменяться.")
+    lines.append(f"\n<i>Обновлено в {now}</i>")
+    return "\n".join(lines)
+
+
+@router.message(Command("bingotop"), F.chat.type == "private", IsStaff())
+async def cmd_bingotop(message: Message) -> None:
+    await message.answer(await ranking_text(),
+                         reply_markup=InlineKeyboardMarkup(inline_keyboard=[[b("🔄 Обновить", "m:bgtop")]]))

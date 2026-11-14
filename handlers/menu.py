@@ -171,6 +171,7 @@ async def scr_bg(admin: bool) -> tuple[str, InlineKeyboardMarkup]:
     rows = []
     if admin and bingo.BINGO_ENABLED:
         rows.append([b("⚪️ Выключить приём", "m:bg:off")] if await bingo.is_open() else [b("🟢 Включить приём", "m:bg:on")])
+    rows.append([b("🏆 Рейтинг бинго", "m:bgtop")])
     rows.append([b("✏️ Тексты заданий", "m:bgt")])
     rows.append([b("🧪 Открыть карточку как делегат", "bgo:grid")])
     rows.append(back())
@@ -265,6 +266,8 @@ async def render(screen: str, user, bot: Bot) -> tuple[str, InlineKeyboardMarkup
         return await scr_words()
     if screen == "bgt":
         return await scr_bgt()
+    if screen == "bgtop":
+        return await bingo.ranking_text(), kb([b("🔄 Обновить", "m:bgtop")], back("bg"))
     if screen == "bg":
         return await scr_bg(admin)
     if screen == "set" and admin:
